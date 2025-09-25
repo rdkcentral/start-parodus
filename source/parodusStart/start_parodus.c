@@ -490,7 +490,7 @@ int main(int argc, char *argv[])
                   {
                           LogError("Empty MAC Address\n");
                   }
-              }
+              
               LogError("Unable to get MAC Address. Retrying...\n");
 	      LogInfo("New backoffRetryTime value calculated as %d seconds\n", backoffRetryTime);
               sleep(backoffRetryTime);
