@@ -242,7 +242,7 @@ int main(int argc, char *argv[])
 	char manufacturer[64]={'\0'};
 #if defined(_COSA_BCM_MIPS_)
 	dpoe_mac_address_t tDpoe_Mac;
-#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_)
+#else
 	CMMGMT_CM_DHCP_INFO dhcpinfo;
 #endif
 	char parodus_url[MAX_SERVER_URL_SIZE] = {'\0'};
