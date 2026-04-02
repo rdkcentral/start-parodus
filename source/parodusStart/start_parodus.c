@@ -1136,8 +1136,12 @@ void getValueFromCfgJson( char *key, char **value, cJSON **out)
                 data[n] = '\0';
             
 	fclose( fileRead );
-        
-        
+    
+	// Test coverity workflow
+	uint8_t* testBuf;
+    testBuf = (uint8_t*)calloc(16, sizeof(uint8_t));
+    (void)testBuf;
+
 	if( data != NULL && (strlen(data) > 0) )
 	{
 	    json = cJSON_Parse( data );
