@@ -46,7 +46,7 @@
 #include "cJSON.h"
 #include "safec_lib_common.h"
 
-#if defined(_PLATFORM_RASPBERRYPI_) || defined(_PLATFORM_TURRIS_) || defined(_PLATFORM_BANANAPI_R4_)
+#if defined(_PLATFORM_RASPBERRYPI_) || defined(_PLATFORM_TURRIS_) || defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
 #include "ccsp_vendor.h"
 #endif
 
@@ -123,7 +123,7 @@
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
 STATIC void get_url(char *parodus_url, char *seshat_url, char *build_type);
-#if defined(_PLATFORM_BANANAPI_R4_)
+#if defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
 STATIC void get_webpa_url(char *webpaUrl);
 #endif	
 STATIC void getPartnerId(char *partner_id);
@@ -139,7 +139,7 @@ STATIC void waitForPSMHealth(char *compName);
 STATIC int syncXpcParamsOnUpgrade(char *lastRebootReason, char *firmwareVersion);
 STATIC void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
 STATIC void get_parodusStart_logFile(char *parodusStart_Log);
-#if !defined(_PLATFORM_BANANAPI_R4_)
+#if !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_)
 STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl);
 #endif
 #if !defined(_COSA_BCM_MIPS_)
@@ -242,7 +242,7 @@ int main(int argc, char *argv[])
 	char manufacturer[64]={'\0'};
 #if defined(_COSA_BCM_MIPS_)
 	dpoe_mac_address_t tDpoe_Mac;
-#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_)
+#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_)
 	CMMGMT_CM_DHCP_INFO dhcpinfo;
 #endif
 	char parodus_url[MAX_SERVER_URL_SIZE] = {'\0'};
@@ -451,7 +451,7 @@ int main(int argc, char *argv[])
                   backoffRetryTime = (int)pow(2, c) - 1;
               }
 
-	      #if !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_)
+	      #if !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_)
               if (cm_hal_GetDHCPInfo(&dhcpinfo) == 0)
 	      {
 		  LogInfo("MACAddress = %s\n", dhcpinfo.MACAddress);
@@ -537,7 +537,7 @@ int main(int argc, char *argv[])
 	 LogInfo("build_type returned is %s\n", build_type);
 
 
-#if defined(_PLATFORM_BANANAPI_R4_)
+#if defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
 	webpaUrl=(char *)malloc(MAX_SERVER_URL_SIZE * sizeof(char)); 
 	get_webpa_url(webpaUrl);
 #else
@@ -888,7 +888,7 @@ RETURN_ERROR:
 /*                             Internal functions                             */
 /*----------------------------------------------------------------------------*/
 
-#if defined(_PLATFORM_BANANAPI_R4_)
+#if defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
 STATIC void get_webpa_url(char *webpaUrl)
 {
     FILE *fp = fopen(DEVICE_PROPS_FILE, "r");
@@ -1639,7 +1639,7 @@ STATIC void get_parodusStart_logFile(char *parodusStart_Log)
  *
  * @param[in] serverUrl server url from config json
  */
-#if !defined(_PLATFORM_BANANAPI_R4_)
+#if !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_)
 STATIC int checkServerUrlFormat(char *serverUrl)
 {
     int chCnt = 0;
