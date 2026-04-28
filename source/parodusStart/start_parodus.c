@@ -242,7 +242,7 @@ int main(int argc, char *argv[])
 	char manufacturer[64]={'\0'};
 #if defined(_COSA_BCM_MIPS_)
 	dpoe_mac_address_t tDpoe_Mac;
-#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_)
+#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_) && !defined(PON_GATEWAY) && !defined(_WNXL11BWL_PRODUCT_REQ_)
 	CMMGMT_CM_DHCP_INFO dhcpinfo;
 #endif
 	char parodus_url[MAX_SERVER_URL_SIZE] = {'\0'};
@@ -382,7 +382,42 @@ int main(int argc, char *argv[])
 		}
 		LogInfo("Modified lastRebootReason is %s\n", final_lastRebootReason);
 	}
-#if defined(_COSA_BCM_MIPS_)
+#if defined(_WNXL11BWL_PRODUCT_REQ_)
+    token_t  token;
+    int fd = s_sysevent_connect(&token);
+    /*Coverity Fix:CID 63390 CHECKED_RETURN */
+    if(fd < 0 ){
+        LogError("s_sysevent_connect() is returned Error\n");
+        return -1;
+    }
+
+    FILE *fp;
+    fp = popen("sh /usr/sbin/deviceinfo.sh -cmac", "r");
+    if (NULL != fp) {
+        char acTmpBuffer[32] = {0};
+        char *p = NULL;
+        fgets(acTmpBuffer, sizeof(acTmpBuffer), fp);
+        if(NULL != (strstr(acTmpBuffer, ":" ))) {
+        /* remove the \n char in buffer */
+            if ((p = strchr(acTmpBuffer, '\n')))
+                *p = 0;
+            rc = strcpy_s(deviceMac, sizeof(deviceMac), acTmpBuffer);
+            if(rc != EOK){
+                ERR_CHK(rc);
+                LogError("Failed to Copy TmpBuffer to deviceMac\n");
+            }
+            LogInfo("XLE deviceMac is %s\n", deviceMac);
+            if(fp) {
+                pclose(fp);
+                fp = NULL;
+            }
+        }
+        else {
+            pclose(fp);
+            LogError("eth0 MAC address is empty\n");
+        }
+   }
+#elif defined(_COSA_BCM_MIPS_)
 	if( dpoe_getOnuId(&tDpoe_Mac) == 0)
 	{
                 rc = sprintf_s(deviceMac, sizeof(deviceMac), "%02x:%02x:%02x:%02x:%02x:%02x",tDpoe_Mac.macAddress[0], tDpoe_Mac.macAddress[1],
@@ -451,7 +486,7 @@ int main(int argc, char *argv[])
                   backoffRetryTime = (int)pow(2, c) - 1;
               }
 
-	      #if !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_)
+	      #if !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_) && !defined(PON_GATEWAY)
               if (cm_hal_GetDHCPInfo(&dhcpinfo) == 0)
 	      {
 		  LogInfo("MACAddress = %s\n", dhcpinfo.MACAddress);
