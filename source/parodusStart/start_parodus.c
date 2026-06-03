@@ -88,6 +88,10 @@
 #define DEVICE_CERT_REF                "/tmp/.cfgDynamicxpki"
 #define STATIC_CERT_REF                "/tmp/.cfgStaticxpki"
 
+#define WEBPA_SERVER_URL_PARAM         "Device.X_RDKCENTRAL-COM_Webpa.Server.URL"
+#define TOKEN_SERVER_URL_PARAM         "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL"
+#define DNS_TEXT_URL_PARAM             "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL"
+
 #if defined(_COSA_QCA_ARM_)
 #define CONFIG_VENDOR_NAME  "QTI"
 #endif
@@ -146,13 +150,14 @@ STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl);
 int s_sysevent_connect (token_t *out_se_token);
 #endif
 static char *pathPrefix  = "eRT.com.cisco.spvtg.ccsp.webpa.";
-static char *WEBPA_SERVER_URL = "";
-static char *TOKEN_SERVER_URL = "";
-static char *DNS_TEXT_URL = "";
+static char *WEBPA_SERVER_URL = NULL;
+static char *TOKEN_SERVER_URL = NULL;
+static char *DNS_TEXT_URL = NULL;
 
 STATIC void getSECertSupport(char *seCert_support);
 static int getDeviceConfigFile();
-
+STATIC int getPartnerSpecificParam(const char *partner_id, const char *param_name, char **value);
+STATIC void updateWebpaCrucialUrlFromPartnerJson(char *partner_id);
 FILE* g_fArmConsoleLog = NULL;
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
@@ -654,17 +659,50 @@ int main(int argc, char *argv[])
 		{
 			free(psmValues[i]);
 		}
-	}
-	LogInfo("WEBPA_SERVER_URL = %s\n", WEBPA_SERVER_URL);
-	LogInfo("TOKEN_SERVER_URL = %s\n", TOKEN_SERVER_URL);
-	LogInfo("DNS_TEXT_URL = %s\n", DNS_TEXT_URL);
+    }
 
-	if(webpaUrl == NULL)
-	{
-		LogInfo("Setting webpaUrl to default server IP\n");
-		webpaUrl = strdup(WEBPA_SERVER_URL);
-	}
+    LogInfo("WEBPA_SERVER_URL = %s\n", WEBPA_SERVER_URL);
+    LogInfo("TOKEN_SERVER_URL = %s\n", TOKEN_SERVER_URL);
+    LogInfo("DNS_TEXT_URL = %s\n", DNS_TEXT_URL);
 
+    if (partner_id[0] != '\0')
+    {
+        updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    }
+
+    if(webpaUrl == NULL || webpaUrl[0] == '\0')
+    {
+        LogInfo("Setting webpaUrl to default server IP\n");
+        if(WEBPA_SERVER_URL != NULL && WEBPA_SERVER_URL[0] != '\0')
+        {
+            /* Free existing allocation if webpaUrl is non-NULL but empty */
+            if(webpaUrl != NULL)
+            {
+                free(webpaUrl);
+                webpaUrl = NULL;
+            }
+
+            webpaUrl = strdup(WEBPA_SERVER_URL);
+            if(webpaUrl != NULL)
+            {
+                LogInfo("webpaUrl is %s\n", webpaUrl);
+            }
+            else
+            {
+                LogError("strdup failed for WEBPA_SERVER_URL\n");
+            }
+        }
+        else
+        {
+            LogError("WEBPA_SERVER_URL is NULL or empty, cannot set webpaUrl\n");
+        }
+    }
+    /* Validate webpaUrl is set before proceeding */
+    if(webpaUrl == NULL || webpaUrl[0] == '\0')
+    {
+        LogError("Unable to determine webpa URL, cannot start parodus\n");
+        goto RETURN_ERROR;
+    }
 
 	getValueFromCfgJson( WEBPA_CFG_ACQUIRE_JWT, &acquireJwt, &out);
 	if(out != NULL && acquireJwt != NULL)
@@ -1849,6 +1887,230 @@ STATIC void getSECertSupport(char *seCert_support)
 		LogInfo("UseSEBasedCert value is %s\n", seCert_support);
 	}
  }
+
+STATIC int getPartnerSpecificParam(const char *partner_id, const char *param_name, char **value)
+{
+    FILE *fileRead = NULL;
+    char *data = NULL;
+    cJSON *json = NULL;
+    cJSON *partnerObj = NULL;
+    cJSON *paramObj = NULL;
+    long len = 0;
+    errno_t rc = -1;
+    char cleanPartnerId[MAX_PARTNERID_LEN] = {'\0'};
+    char *partnerKey = NULL;
+
+    if (partner_id == NULL || partner_id[0] == '\0')
+    {
+        LogError("Partner ID is NULL or empty\n");
+        return -1;
+    }
+
+    // Strip "*," prefix if present to get actual partner key for JSON lookup
+    if (strncmp(partner_id, "*,", 2) == 0)
+    {
+        partnerKey = (char *)(partner_id + 2); // Skip "*,"
+    }
+    else
+    {
+        partnerKey = (char *)partner_id;
+    }
+
+    rc = strcpy_s(cleanPartnerId, sizeof(cleanPartnerId), partnerKey);
+    if (rc != EOK)
+    {
+        ERR_CHK(rc);
+        LogError("Failed to copy partner ID\n");
+        return -1;
+    }
+
+    LogInfo("Looking up partner '%s' in JSON config\n", cleanPartnerId);
+
+    fileRead = fopen("/etc/partners_defaults.json", "r");
+    if (fileRead == NULL)
+    {
+        LogError("Failed to open /etc/partners_defaults.json file\n");
+        return -1;
+    }
+
+    fseek(fileRead, 0, SEEK_END);
+    len = ftell(fileRead);
+    fseek(fileRead, 0, SEEK_SET);
+
+    if (len <= 0)
+    {
+        LogError("Invalid file length\n");
+        fclose(fileRead);
+        return -1;
+    }
+
+    data = (char *)malloc(sizeof(char) * (len + 1));
+    if (data == NULL)
+    {
+        LogError("Failed to allocate memory\n");
+        fclose(fileRead);
+        return -1;
+    }
+
+    memset(data, 0, (sizeof(char) * (len + 1)));
+    size_t bytesRead = fread(data, 1, len, fileRead);
+    fclose(fileRead);
+    if (bytesRead != (size_t)len)
+    {
+        LogError("Failed to read complete JSON file: expected %ld bytes, got %zu\n", len, bytesRead);
+        free(data);
+        return -1;
+    }
+
+    json = cJSON_Parse(data);
+    if (json == NULL)
+    {
+        LogError("Failed to parse JSON data\n");
+        free(data);
+        return -1;
+    }
+
+    partnerObj = cJSON_GetObjectItem(json, cleanPartnerId);
+    if (partnerObj == NULL)
+    {
+        LogError("Partner ID '%s' not found in JSON\n", cleanPartnerId);
+        cJSON_Delete(json);
+        free(data);
+        return -1;
+    }
+
+    paramObj = cJSON_GetObjectItem(partnerObj, param_name);
+    if (paramObj == NULL || !cJSON_IsString(paramObj))
+    {
+        LogError("Parameter '%s' not found for partner '%s'\n", param_name, cleanPartnerId);
+        cJSON_Delete(json);
+        free(data);
+        return -1;
+    }
+
+    *value = strdup(paramObj->valuestring);
+    if (*value == NULL)
+    {
+        LogError("Failed to allocate memory for value\n");
+        cJSON_Delete(json);
+        free(data);
+        return -1;
+    }
+
+    LogInfo("Retrieved %s = %s for partner %s\n", param_name, *value, cleanPartnerId);
+
+    cJSON_Delete(json);
+    free(data);
+
+    return 0;
+}
+
+STATIC void updateWebpaCrucialUrlFromPartnerJson(char *partner_id)
+{
+    char *partnerServerUrl = NULL;
+
+    if (WEBPA_SERVER_URL == NULL || WEBPA_SERVER_URL[0] == '\0')
+    {
+        LogInfo("WEBPA_SERVER_URL is NULL or empty, fetching from partner JSON\n");
+
+        if (getPartnerSpecificParam(partner_id, WEBPA_SERVER_URL_PARAM, &partnerServerUrl) == 0)
+        {
+            if (partnerServerUrl != NULL && partnerServerUrl[0] != '\0')
+            {
+                if (WEBPA_SERVER_URL != NULL && WEBPA_SERVER_URL != partnerServerUrl)
+                {
+                    free(WEBPA_SERVER_URL);
+                }
+                WEBPA_SERVER_URL = partnerServerUrl;
+                LogInfo("Updated WEBPA_SERVER_URL from partner JSON: %s\n", WEBPA_SERVER_URL);
+            }
+            else
+            {
+                LogError("Retrieved empty value from partner JSON for WEBPA_SERVER_URL\n");
+                if (partnerServerUrl != NULL)
+                {
+                    free(partnerServerUrl);
+                }
+            }
+        }
+        else
+        {
+            LogError("Failed to retrieve WEBPA_SERVER_URL from partner JSON\n");
+        }
+    }
+    else
+    {
+        LogInfo("WEBPA_SERVER_URL already set: %s\n", WEBPA_SERVER_URL);
+    }
+
+	if (TOKEN_SERVER_URL == NULL || TOKEN_SERVER_URL[0] == '\0')
+	{
+		LogInfo("TOKEN_SERVER_URL is NULL or empty, fetching from partner JSON\n");
+
+        if (getPartnerSpecificParam(partner_id, TOKEN_SERVER_URL_PARAM, &partnerServerUrl) == 0)
+		{
+			if (partnerServerUrl != NULL && partnerServerUrl[0] != '\0')
+			{
+				if (TOKEN_SERVER_URL != NULL && TOKEN_SERVER_URL != partnerServerUrl)
+				{
+					free(TOKEN_SERVER_URL);
+				}
+				TOKEN_SERVER_URL = partnerServerUrl;
+				LogInfo("Updated TOKEN_SERVER_URL from partner JSON: %s\n", TOKEN_SERVER_URL);
+			}
+			else
+			{
+				LogError("Retrieved empty value from partner JSON for TOKEN_SERVER_URL\n");
+				if (partnerServerUrl != NULL)
+				{
+					free(partnerServerUrl);
+				}
+			}
+		}
+		else
+		{
+			LogError("Failed to retrieve TOKEN_SERVER_URL from partner JSON\n");
+		}
+	}
+	else
+	{
+		LogInfo("TOKEN_SERVER_URL already set: %s\n", TOKEN_SERVER_URL);
+	}
+
+	if (DNS_TEXT_URL == NULL || DNS_TEXT_URL[0] == '\0')
+	{
+		LogInfo("DNS_TEXT_URL is NULL or empty, fetching from partner JSON\n");
+
+        if (getPartnerSpecificParam(partner_id, DNS_TEXT_URL_PARAM, &partnerServerUrl) == 0)
+		{
+			if (partnerServerUrl != NULL && partnerServerUrl[0] != '\0')
+			{
+				if (DNS_TEXT_URL != NULL && DNS_TEXT_URL != partnerServerUrl)
+				{
+					free(DNS_TEXT_URL);
+				}
+				DNS_TEXT_URL = partnerServerUrl;
+				LogInfo("Updated DNS_TEXT_URL from partner JSON: %s\n", DNS_TEXT_URL);
+			}
+			else
+			{
+				LogError("Retrieved empty value from partner JSON for DNS_TEXT_URL\n");
+				if (partnerServerUrl != NULL)
+				{
+					free(partnerServerUrl);
+				}
+			}
+		}
+		else
+		{
+			LogError("Failed to retrieve DNS_TEXT_URL from partner JSON\n");
+		}
+	}
+	else
+	{
+		LogInfo("DNS_TEXT_URL already set: %s\n", DNS_TEXT_URL);
+	}
+}
 
 static int getDeviceConfigFile()
 {
