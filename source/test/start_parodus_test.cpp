@@ -48,9 +48,19 @@ void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
 void waitForPSMHealth(char *compName);
 void getSECertSupport(char *seCert_support);
 int syncXpcParamsOnUpgrade(char *lastRebootReason, char *firmwareVersion);
+int getPartnerSpecificParam(const char *partner_id, const char *param_name, char **value);
+void updateWebpaCrucialUrlFromPartnerJson(char *partner_id);
+
+// Global vars needed for updateWebpaCrucialUrlFromPartnerJson testing
+extern char *WEBPA_SERVER_URL;
+extern char *TOKEN_SERVER_URL;
+extern char *DNS_TEXT_URL;
 }
 
 #define MAX_PARTNERID_LEN              64
+#define WEBPA_SERVER_URL_PARAM         "Device.X_RDKCENTRAL-COM_Webpa.Server.URL"
+#define TOKEN_SERVER_URL_PARAM         "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL"
+#define DNS_TEXT_URL_PARAM             "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL"
 int numLoops;
 
 extern SafecLibMock * g_safecLibMock;
@@ -2615,4 +2625,2061 @@ TEST_F(StartParodusTestFixture, syncXpcParamsOnUpgrade_Success)
     
     ret = syncXpcParamsOnUpgrade(const_cast<char*>(lastRebootReason), const_cast<char*>(firmwareVersion));
     ASSERT_EQ(ret, 0);
+}
+
+// getPartnerSpecificParam Tests
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_Success)
+{
+    const char* partner_id = "comcast";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    const char* expected_url = "https://webpa.comcast.net:8080";
+    
+    // Create a valid JSON file content
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "https://token.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": "https://dns.comcast.net"
+        }
+    })";
+    size_t json_size = strlen(json_content);
+    
+    // Create mock cJSON objects
+    cJSON* mockJsonRoot = new cJSON();
+    cJSON* mockPartnerObj = new cJSON();
+    cJSON* mockUrlItem = new cJSON();
+    mockUrlItem->type = cJSON_String;
+    mockUrlItem->valuestring = strdup(expected_url);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, _, _, mockFile))
+        .WillOnce(::testing::DoAll(
+            ::testing::WithArg<0>(::testing::Invoke([json_content, json_size](void* ptr) {
+                memcpy(ptr, json_content, json_size);
+            })),
+            Return(json_size)
+        ));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj))  // First call returns partner object
+        .WillOnce(Return(mockUrlItem));     // Second call returns URL item
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1));  // Validate that paramObj is a string
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot, mockPartnerObj, mockUrlItem](cJSON* json) {
+            if (mockUrlItem->valuestring) free(mockUrlItem->valuestring);
+            delete mockUrlItem;
+            delete mockPartnerObj;
+            delete mockJsonRoot;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, 0);
+    ASSERT_NE(value, nullptr);
+    EXPECT_STREQ(value, expected_url);
+    
+    if (value) free(value);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_WithStarCommaPrefix)
+{
+    const char* partner_id = "*,comcast";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    const char* expected_url = "https://webpa.comcast.net:8080";
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080"
+        }
+    })";
+    size_t json_size = strlen(json_content);
+    
+    // Create mock cJSON objects
+    cJSON* mockJsonRoot = new cJSON();
+    cJSON* mockPartnerObj = new cJSON();
+    cJSON* mockUrlItem = new cJSON();
+    mockUrlItem->type = cJSON_String;
+    mockUrlItem->valuestring = strdup(expected_url);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, _, _, mockFile))
+        .WillOnce(::testing::DoAll(
+            ::testing::WithArg<0>(::testing::Invoke([json_content, json_size](void* ptr) {
+                memcpy(ptr, json_content, json_size);
+            })),
+            Return(json_size)
+        ));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj))  // First call returns partner object
+        .WillOnce(Return(mockUrlItem));     // Second call returns URL item
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1));  // Validate that paramObj is a string
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot, mockPartnerObj, mockUrlItem](cJSON* json) {
+            if (mockUrlItem->valuestring) free(mockUrlItem->valuestring);
+            delete mockUrlItem;
+            delete mockPartnerObj;
+            delete mockJsonRoot;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, 0);
+    ASSERT_NE(value, nullptr);
+    EXPECT_STREQ(value, expected_url);
+    
+    if (value) free(value);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_NullPartnerId)
+{
+    const char* partner_id = nullptr;
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_EmptyPartnerId)
+{
+    const char* partner_id = "";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_FileOpenFailure)
+{
+    const char* partner_id = "comcast";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(nullptr));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(0))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_InvalidJson)
+{
+    const char* partner_id = "comcast";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    // Invalid JSON (missing closing brace)
+    const char* json_content = R"({"comcast": {"Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080")";
+    size_t json_size = strlen(json_content);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, _, _, mockFile))
+        .WillOnce(::testing::DoAll(
+            ::testing::WithArg<0>(::testing::Invoke([json_content, json_size](void* ptr) {
+                memcpy(ptr, json_content, json_size);
+            })),
+            Return(json_size)
+        ));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(nullptr));  // Invalid JSON parse failure
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_MissingPartnerKey)
+{
+    const char* partner_id = "unknown_partner";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080"
+        }
+    })";
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    size_t json_size = strlen(json_content);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .WillOnce(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    // Mock cJSON - parse succeeds but partner key not found
+    cJSON* mockJsonRoot = new cJSON();
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(nullptr));  // Partner key not found
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot](cJSON* json) {
+            delete mockJsonRoot;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_MissingParameter)
+{
+    const char* partner_id = "comcast";
+    const char* param_name = "Device.NonExistent.Parameter";
+    char* value = nullptr;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080"
+        }
+    })";
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    size_t json_size = strlen(json_content);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .WillOnce(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    // Mock cJSON - parse succeeds, partner found, but parameter not found
+    cJSON* mockJsonRoot = new cJSON();
+    cJSON* mockPartnerObj = new cJSON();
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj))  // Partner found
+        .WillOnce(Return(nullptr));  // Parameter not found
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot, mockPartnerObj](cJSON* json) {
+            delete mockPartnerObj;
+            delete mockJsonRoot;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_InvalidFileLengthZero)
+{
+    const char* partner_id = "comcast";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    // Empty file (length 0)
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+TEST_F(StartParodusTestFixture, getPartnerSpecificParam_StrcpyFailure)
+{
+    const char* partner_id = "comcast";
+    const char* param_name = WEBPA_SERVER_URL_PARAM;
+    char* value = nullptr;
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .WillOnce(Return(-1));  // Fail on the strcpy_s call
+    
+    int ret = getPartnerSpecificParam(partner_id, param_name, &value);
+    
+    EXPECT_EQ(ret, -1);
+    EXPECT_EQ(value, nullptr);
+}
+
+// updateWebpaCrucialUrlFromPartnerJson Tests
+class UpdateWebpaCrucialUrlTestFixture : public StartParodusTestFixture {
+protected:
+    char* saved_webpa_url;
+    char* saved_token_url;
+    char* saved_dns_url;
+    
+    void SetUp() override {
+        StartParodusTestFixture::SetUp();
+        // Save original global values
+        saved_webpa_url = WEBPA_SERVER_URL;
+        saved_token_url = TOKEN_SERVER_URL;
+        saved_dns_url = DNS_TEXT_URL;
+    }
+    
+    void TearDown() override {
+        // Restore original global values (but don't free, they might be static strings)
+        WEBPA_SERVER_URL = saved_webpa_url;
+        TOKEN_SERVER_URL = saved_token_url;
+        DNS_TEXT_URL = saved_dns_url;
+        StartParodusTestFixture::TearDown();
+    }
+};
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_AllUrlsEmpty_Success)
+{
+    char partner_id[] = "comcast";
+    
+    // Set all URLs to NULL initially (mimics production initialization)
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "https://token.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": "https://dns.comcast.net"
+        }
+    })";
+    size_t json_size = strlen(json_content);
+    
+    // Mock file operations for all three URL fetches - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, _, _, mockFile))
+        .Times(3)
+        .WillRepeatedly(::testing::DoAll(
+            ::testing::WithArg<0>(::testing::Invoke([json_content, json_size](void* ptr) {
+                memcpy(ptr, json_content, json_size);
+            })),
+            Return(json_size)
+        ));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Create mock cJSON objects for all three URL fetches
+    const char* urls[] = {
+        "https://webpa.comcast.net:8080",
+        "https://token.comcast.net:8080",
+        "https://dns.comcast.net"
+    };
+    
+    // Create separate cJSON objects for each of the 3 URL fetch operations
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup(urls[0]);
+    
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    cJSON* mockUrlItem2 = new cJSON();
+    mockUrlItem2->type = cJSON_String;
+    mockUrlItem2->valuestring = strdup(urls[1]);
+    
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    cJSON* mockUrlItem3 = new cJSON();
+    mockUrlItem3->type = cJSON_String;
+    mockUrlItem3->valuestring = strdup(urls[2]);
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(mockUrlItem2))
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(mockUrlItem3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2, mockUrlItem2](cJSON* json) {
+            if (mockUrlItem2->valuestring) free(mockUrlItem2->valuestring);
+            delete mockUrlItem2;
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3, mockUrlItem3](cJSON* json) {
+            if (mockUrlItem3->valuestring) free(mockUrlItem3->valuestring);
+            delete mockUrlItem3;
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Verify all URLs were updated
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.comcast.net:8080");
+    
+    ASSERT_NE(TOKEN_SERVER_URL, nullptr);
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://token.comcast.net:8080");
+    
+    ASSERT_NE(DNS_TEXT_URL, nullptr);
+    EXPECT_STREQ(DNS_TEXT_URL, "https://dns.comcast.net");
+    
+    // Clean up heap-allocated strings
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+    if (TOKEN_SERVER_URL && TOKEN_SERVER_URL != saved_token_url) free(TOKEN_SERVER_URL);
+    if (DNS_TEXT_URL && DNS_TEXT_URL != saved_dns_url) free(DNS_TEXT_URL);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_AllUrlsAlreadySet)
+{
+    char partner_id[] = "comcast";
+    
+    // Set all URLs to non-empty values
+    WEBPA_SERVER_URL = (char*)"https://existing-webpa.com";
+    TOKEN_SERVER_URL = (char*)"https://existing-token.com";
+    DNS_TEXT_URL = (char*)"https://existing-dns.com";
+    
+    // No fopen calls should be made since URLs are already set
+    EXPECT_CALL(*g_fopenMock, fopen_mock(_, _))
+        .Times(0);
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Verify URLs remain unchanged
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://existing-webpa.com");
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://existing-token.com");
+    EXPECT_STREQ(DNS_TEXT_URL, "https://existing-dns.com");
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_WebpaUrlNull_OthersSet)
+{
+    char partner_id[] = "comcast";
+    
+    // Only WEBPA_SERVER_URL is NULL/empty
+    WEBPA_SERVER_URL = nullptr;
+    TOKEN_SERVER_URL = (char*)"https://existing-token.com";
+    DNS_TEXT_URL = (char*)"https://existing-dns.com";
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080"
+        }
+    })";
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    size_t json_size = strlen(json_content);
+    
+    // Only one fopen call for WEBPA_SERVER_URL
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .WillOnce(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .WillOnce(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+    
+    // Mock cJSON for successful URL fetch
+    cJSON* mockJsonRoot = new cJSON();
+    cJSON* mockPartnerObj = new cJSON();
+    cJSON* mockUrlItem = new cJSON();
+    mockUrlItem->type = cJSON_String;
+    mockUrlItem->valuestring = strdup("https://webpa.comcast.net:8080");
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj))
+        .WillOnce(Return(mockUrlItem));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1));  // Validate that paramObj is a string
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot, mockPartnerObj, mockUrlItem](cJSON* json) {
+            if (mockUrlItem->valuestring) free(mockUrlItem->valuestring);
+            delete mockUrlItem;
+            delete mockPartnerObj;
+            delete mockJsonRoot;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(1))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Verify only WEBPA_SERVER_URL was updated
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.comcast.net:8080");
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://existing-token.com");
+    EXPECT_STREQ(DNS_TEXT_URL, "https://existing-dns.com");
+    
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_PartnerJsonFileNotFound)
+{
+    char partner_id[] = "comcast";
+    
+    // Set all URLs to NULL
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Simulate file not found for all three attempts
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(0))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL since fetch failed
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_PartnerNotInJson)
+{
+    char partner_id[] = "unknown_partner";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    // Mock file operations for all three attempts (will all fail to find partner) - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three attempts - partner not found
+    // Create separate cJSON objects for each of the 3 attempts
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockJsonRoot3 = new cJSON();
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(nullptr))
+        .WillOnce(Return(nullptr))
+        .WillOnce(Return(nullptr));  // Partner not found
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1](cJSON* json) {
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2](cJSON* json) {
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3](cJSON* json) {
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL since partner not found
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_CorruptJson)
+{
+    char partner_id[] = "comcast";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Corrupt JSON
+    const char* json_content = R"({corrupt json data)";
+    
+    size_t json_size = strlen(json_content);
+    
+    // Mock file operations for all three attempts - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three attempts - corrupt JSON parse failure
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));  // JSON parse fails
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL due to JSON parse failure
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_StarCommaPrefix)
+{
+    char partner_id[] = "*,comcast";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "https://token.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": "https://dns.comcast.net"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    // Mock file operations for all three URL fetches - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three successful URL fetches
+    const char* urls[] = {
+        "https://webpa.comcast.net:8080",
+        "https://token.comcast.net:8080",
+        "https://dns.comcast.net"
+    };
+    
+    // Create separate cJSON objects for each of the 3 URL fetch operations
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup(urls[0]);
+    
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    cJSON* mockUrlItem2 = new cJSON();
+    mockUrlItem2->type = cJSON_String;
+    mockUrlItem2->valuestring = strdup(urls[1]);
+    
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    cJSON* mockUrlItem3 = new cJSON();
+    mockUrlItem3->type = cJSON_String;
+    mockUrlItem3->valuestring = strdup(urls[2]);
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(mockUrlItem2))
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(mockUrlItem3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2, mockUrlItem2](cJSON* json) {
+            if (mockUrlItem2->valuestring) free(mockUrlItem2->valuestring);
+            delete mockUrlItem2;
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3, mockUrlItem3](cJSON* json) {
+            if (mockUrlItem3->valuestring) free(mockUrlItem3->valuestring);
+            delete mockUrlItem3;
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Verify all URLs were updated despite "*," prefix
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.comcast.net:8080");
+    
+    ASSERT_NE(TOKEN_SERVER_URL, nullptr);
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://token.comcast.net:8080");
+    
+    ASSERT_NE(DNS_TEXT_URL, nullptr);
+    EXPECT_STREQ(DNS_TEXT_URL, "https://dns.comcast.net");
+    
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+    if (TOKEN_SERVER_URL && TOKEN_SERVER_URL != saved_token_url) free(TOKEN_SERVER_URL);
+    if (DNS_TEXT_URL && DNS_TEXT_URL != saved_dns_url) free(DNS_TEXT_URL);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_MissingOneParameter)
+{
+    char partner_id[] = "comcast";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // JSON with only 2 out of 3 parameters
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "https://token.comcast.net:8080"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    // Mock file operations for all three attempts - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for 2 successful URL fetches and 1 failure
+    // First two succeed
+    const char* urls[] = {
+        "https://webpa.comcast.net:8080",
+        "https://token.comcast.net:8080"
+    };
+    
+    // Create separate cJSON objects for all 3 fetches
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup(urls[0]);
+    
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    cJSON* mockUrlItem2 = new cJSON();
+    mockUrlItem2->type = cJSON_String;
+    mockUrlItem2->valuestring = strdup(urls[1]);
+    
+    // Third one fails - partner found but DNS parameter not found
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(mockUrlItem2))
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(nullptr));  // DNS parameter not found
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2, mockUrlItem2](cJSON* json) {
+            if (mockUrlItem2->valuestring) free(mockUrlItem2->valuestring);
+            delete mockUrlItem2;
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3](cJSON* json) {
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // First two should be updated, DNS_TEXT_URL should remain empty
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.comcast.net:8080");
+    
+    ASSERT_NE(TOKEN_SERVER_URL, nullptr);
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://token.comcast.net:8080");
+    
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+    
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+    if (TOKEN_SERVER_URL && TOKEN_SERVER_URL != saved_token_url) free(TOKEN_SERVER_URL);
+}
+
+// Test to verify NULL initialization doesn't cause issues
+TEST_F(UpdateWebpaCrucialUrlTestFixture, updateWebpaCrucialUrl_InitialNullState)
+{
+    char partner_id[] = "comcast";
+    
+    // Verify initial state is NULL (matching production initialization)
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Mock file not found - should handle gracefully without crashes
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(0))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    // Should not crash with NULL pointers
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+// Integration tests for webpaUrl fallback with partner JSON
+TEST_F(UpdateWebpaCrucialUrlTestFixture, webpaUrlFallback_SuccessFromPartnerJson)
+{
+    char partner_id[] = "comcast";
+    
+    // Simulate corrupted/missing NVRAM - PSM values are NULL
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa-partner.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "https://token-partner.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": "https://dns-partner.comcast.net"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    // Mock partner JSON file reads for all three URL fetches - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three successful URL fetches
+    const char* urls[] = {
+        "https://webpa-partner.comcast.net:8080",
+        "https://token-partner.comcast.net:8080",
+        "https://dns-partner.comcast.net"
+    };
+    
+    // Create separate cJSON objects for each of the 3 URL fetch operations
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup(urls[0]);
+    
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    cJSON* mockUrlItem2 = new cJSON();
+    mockUrlItem2->type = cJSON_String;
+    mockUrlItem2->valuestring = strdup(urls[1]);
+    
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    cJSON* mockUrlItem3 = new cJSON();
+    mockUrlItem3->type = cJSON_String;
+    mockUrlItem3->valuestring = strdup(urls[2]);
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(mockUrlItem2))
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(mockUrlItem3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2, mockUrlItem2](cJSON* json) {
+            if (mockUrlItem2->valuestring) free(mockUrlItem2->valuestring);
+            delete mockUrlItem2;
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3, mockUrlItem3](cJSON* json) {
+            if (mockUrlItem3->valuestring) free(mockUrlItem3->valuestring);
+            delete mockUrlItem3;
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    // Call the function that updates URLs from partner JSON
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Verify URLs were updated from partner JSON
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa-partner.comcast.net:8080");
+    
+    ASSERT_NE(TOKEN_SERVER_URL, nullptr);
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://token-partner.comcast.net:8080");
+    
+    ASSERT_NE(DNS_TEXT_URL, nullptr);
+    EXPECT_STREQ(DNS_TEXT_URL, "https://dns-partner.comcast.net");
+    
+    // Cleanup
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+    if (TOKEN_SERVER_URL && TOKEN_SERVER_URL != saved_token_url) free(TOKEN_SERVER_URL);
+    if (DNS_TEXT_URL && DNS_TEXT_URL != saved_dns_url) free(DNS_TEXT_URL);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, webpaUrlFallback_PartnerJsonMissing_NoFallback)
+{
+    char partner_id[] = "comcast";
+    
+    // PSM values are NULL (corrupted NVRAM scenario)
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Partner JSON file is missing
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(0))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL since fallback failed
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+    
+    // In production, this would lead to RETURN_ERROR when trying to set webpaUrl
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, webpaUrlFallback_PartnerKeyMissing_NoFallback)
+{
+    char partner_id[] = "unknown_device_partner";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    // Mock file operations - partner key won't be found - use single FILE* pointer
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+                memcpy(ptr, json_content, json_size);
+                return json_size;
+            }));
+        
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three attempts - partner not found
+    // Create separate cJSON objects for each of the 3 attempts
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockJsonRoot3 = new cJSON();
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(nullptr))
+        .WillOnce(Return(nullptr))
+        .WillOnce(Return(nullptr));  // Partner not found
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1](cJSON* json) {
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2](cJSON* json) {
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3](cJSON* json) {
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL since partner key not found
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, webpaUrlFallback_EmptyUrlInPartnerJson)
+{
+    char partner_id[] = "comcast";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Partner JSON has empty string for URL
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": ""
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three fetches - partner/param found but URLs are empty strings
+    // Create separate cJSON objects for each of the 3 fetches
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup("");  // Empty string
+    
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    cJSON* mockUrlItem2 = new cJSON();
+    mockUrlItem2->type = cJSON_String;
+    mockUrlItem2->valuestring = strdup("");  // Empty string
+    
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    cJSON* mockUrlItem3 = new cJSON();
+    mockUrlItem3->type = cJSON_String;
+    mockUrlItem3->valuestring = strdup("");  // Empty string
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(mockUrlItem2))
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(mockUrlItem3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2, mockUrlItem2](cJSON* json) {
+            if (mockUrlItem2->valuestring) free(mockUrlItem2->valuestring);
+            delete mockUrlItem2;
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3, mockUrlItem3](cJSON* json) {
+            if (mockUrlItem3->valuestring) free(mockUrlItem3->valuestring);
+            delete mockUrlItem3;
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL since retrieved values were empty
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, webpaUrlFallback_CorruptedJsonInPartnerFile)
+{
+    char partner_id[] = "comcast";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Corrupted JSON (mimics corrupted file system scenario)
+    const char* json_content = R"({invalid json "comcast": {)";
+    
+    size_t json_size = strlen(json_content);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three attempts - corrupted JSON parse failure
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));  // JSON parse fails
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // URLs should remain NULL due to JSON parse failure
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, webpaUrlFallback_MissingSpecificParameter)
+{
+    char partner_id[] = "comcast";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Partner JSON missing TOKEN_SERVER_URL parameter
+    const char* json_content = R"({
+        "comcast": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.comcast.net:8080",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": "https://dns.comcast.net"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for 3 fetches: WEBPA (success), TOKEN (missing param), DNS (success)
+    // First fetch: WEBPA_SERVER_URL - succeeds
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup("https://webpa.comcast.net:8080");
+    
+    // Second fetch: TOKEN_SERVER_URL - parameter not found
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    
+    // Third fetch: DNS_TEXT_URL - succeeds
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    cJSON* mockUrlItem3 = new cJSON();
+    mockUrlItem3->type = cJSON_String;
+    mockUrlItem3->valuestring = strdup("https://dns.comcast.net");
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(nullptr))  // TOKEN parameter not found
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(mockUrlItem3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))  // For WEBPA
+        .WillOnce(Return(1));  // For DNS
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2](cJSON* json) {
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3, mockUrlItem3](cJSON* json) {
+            if (mockUrlItem3->valuestring) free(mockUrlItem3->valuestring);
+            delete mockUrlItem3;
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // WEBPA_SERVER_URL and DNS_TEXT_URL should be set
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.comcast.net:8080");
+    
+    // TOKEN_SERVER_URL should remain NULL (parameter missing)
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    
+    ASSERT_NE(DNS_TEXT_URL, nullptr);
+    EXPECT_STREQ(DNS_TEXT_URL, "https://dns.comcast.net");
+    
+    // Cleanup
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+    if (DNS_TEXT_URL && DNS_TEXT_URL != saved_dns_url) free(DNS_TEXT_URL);
+}
+
+// Additional regression tests for webpaUrl fallback scenarios
+TEST_F(UpdateWebpaCrucialUrlTestFixture, partnerJsonFallback_PSMEmptyPartnerJsonValid)
+{
+    char partner_id[] = "sky";
+    
+    // Simulate PSM database returning empty/NULL values (corrupted NVRAM)
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // But partner JSON file is valid and provides fallback
+    const char* json_content = R"({
+        "sky": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.sky.com:443",
+            "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL": "https://token.sky.com:443",
+            "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL": "https://dns.sky.com"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for all three successful URL fetches
+    const char* urls[] = {
+        "https://webpa.sky.com:443",
+        "https://token.sky.com:443",
+        "https://dns.sky.com"
+    };
+    
+    // Create separate cJSON objects for each of the 3 URL fetch operations
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup(urls[0]);
+    
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    cJSON* mockUrlItem2 = new cJSON();
+    mockUrlItem2->type = cJSON_String;
+    mockUrlItem2->valuestring = strdup(urls[1]);
+    
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    cJSON* mockUrlItem3 = new cJSON();
+    mockUrlItem3->type = cJSON_String;
+    mockUrlItem3->valuestring = strdup(urls[2]);
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(mockUrlItem2))
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(mockUrlItem3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1))
+        .WillOnce(Return(1));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2, mockUrlItem2](cJSON* json) {
+            if (mockUrlItem2->valuestring) free(mockUrlItem2->valuestring);
+            delete mockUrlItem2;
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3, mockUrlItem3](cJSON* json) {
+            if (mockUrlItem3->valuestring) free(mockUrlItem3->valuestring);
+            delete mockUrlItem3;
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    // This is the key function that handles the fallback
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Verify fallback succeeded - URLs populated from partner JSON
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.sky.com:443");
+    
+    ASSERT_NE(TOKEN_SERVER_URL, nullptr);
+    EXPECT_STREQ(TOKEN_SERVER_URL, "https://token.sky.com:443");
+    
+    ASSERT_NE(DNS_TEXT_URL, nullptr);
+    EXPECT_STREQ(DNS_TEXT_URL, "https://dns.sky.com");
+    
+    // Cleanup heap allocations
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
+    if (TOKEN_SERVER_URL && TOKEN_SERVER_URL != saved_token_url) free(TOKEN_SERVER_URL);
+    if (DNS_TEXT_URL && DNS_TEXT_URL != saved_dns_url) free(DNS_TEXT_URL);
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, partnerJsonFallback_BothPSMAndPartnerJsonMissing)
+{
+    char partner_id[] = "test_partner";
+    
+    // Both PSM and partner JSON fail - worst case scenario
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Partner JSON file doesn't exist
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(0))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // All URLs should remain NULL - this would trigger RETURN_ERROR in main()
+    EXPECT_EQ(WEBPA_SERVER_URL, nullptr);
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+    
+    // Note: In production main() code, this leads to:
+    // "Unable to determine webpa URL, cannot start parodus" error and exit
+}
+
+TEST_F(UpdateWebpaCrucialUrlTestFixture, partnerJsonFallback_PartialSuccess_OnlyWebpaUrlSet)
+{
+    char partner_id[] = "charter";
+    
+    WEBPA_SERVER_URL = NULL;
+    TOKEN_SERVER_URL = NULL;
+    DNS_TEXT_URL = NULL;
+    
+    // Partner JSON only has WEBPA_SERVER_URL (partial configuration)
+    const char* json_content = R"({
+        "charter": {
+            "Device.X_RDKCENTRAL-COM_Webpa.Server.URL": "https://webpa.charter.com:8443"
+        }
+    })";
+    
+    size_t json_size = strlen(json_content);
+    
+    FILE* mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr);
+    
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/partners_defaults.json"), StrEq("r")))
+        .Times(3)
+        .WillRepeatedly(Return(mockFile));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_END))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(json_size));
+    
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, SEEK_SET))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([json_content, json_size](void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(3)
+        .WillRepeatedly(Return(0));
+    
+    // Mock cJSON for 3 fetches: WEBPA (success), TOKEN (missing param), DNS (missing param)
+    // First fetch: WEBPA_SERVER_URL - succeeds
+    cJSON* mockJsonRoot1 = new cJSON();
+    cJSON* mockPartnerObj1 = new cJSON();
+    cJSON* mockUrlItem1 = new cJSON();
+    mockUrlItem1->type = cJSON_String;
+    mockUrlItem1->valuestring = strdup("https://webpa.charter.com:8443");
+    
+    // Second and third fetches: TOKEN and DNS parameters not found
+    cJSON* mockJsonRoot2 = new cJSON();
+    cJSON* mockPartnerObj2 = new cJSON();
+    
+    cJSON* mockJsonRoot3 = new cJSON();
+    cJSON* mockPartnerObj3 = new cJSON();
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(mockJsonRoot1))
+        .WillOnce(Return(mockJsonRoot2))
+        .WillOnce(Return(mockJsonRoot3));
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(mockPartnerObj1))
+        .WillOnce(Return(mockUrlItem1))
+        .WillOnce(Return(mockPartnerObj2))
+        .WillOnce(Return(nullptr))  // TOKEN parameter not found
+        .WillOnce(Return(mockPartnerObj3))
+        .WillOnce(Return(nullptr));  // DNS parameter not found
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1));  // For WEBPA
+    
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .WillOnce(Invoke([mockJsonRoot1, mockPartnerObj1, mockUrlItem1](cJSON* json) {
+            if (mockUrlItem1->valuestring) free(mockUrlItem1->valuestring);
+            delete mockUrlItem1;
+            delete mockPartnerObj1;
+            delete mockJsonRoot1;
+        }))
+        .WillOnce(Invoke([mockJsonRoot2, mockPartnerObj2](cJSON* json) {
+            delete mockPartnerObj2;
+            delete mockJsonRoot2;
+        }))
+        .WillOnce(Invoke([mockJsonRoot3, mockPartnerObj3](cJSON* json) {
+            delete mockPartnerObj3;
+            delete mockJsonRoot3;
+        }));
+    
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(::testing::AtLeast(3))
+        .WillRepeatedly(Invoke([](char* dest, size_t destSize, const char* src, size_t srcSize) {
+            strncpy(dest, src, destSize);
+            return 0;
+        }));
+    
+    updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    
+    // Only WEBPA_SERVER_URL should be set (minimal viable config for parodus)
+    ASSERT_NE(WEBPA_SERVER_URL, nullptr);
+    EXPECT_STREQ(WEBPA_SERVER_URL, "https://webpa.charter.com:8443");
+    
+    // Others remain NULL
+    EXPECT_EQ(TOKEN_SERVER_URL, nullptr);
+    EXPECT_EQ(DNS_TEXT_URL, nullptr);
+    
+    // This is acceptable - parodus can still start with just webpa URL
+    
+    // Cleanup
+    if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
 }
