@@ -150,9 +150,9 @@ STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl);
 int s_sysevent_connect (token_t *out_se_token);
 #endif
 static char *pathPrefix  = "eRT.com.cisco.spvtg.ccsp.webpa.";
-static char *WEBPA_SERVER_URL = NULL;
-static char *TOKEN_SERVER_URL = NULL;
-static char *DNS_TEXT_URL = NULL;
+STATIC char *WEBPA_SERVER_URL = NULL;
+STATIC char *TOKEN_SERVER_URL = NULL;
+STATIC char *DNS_TEXT_URL = NULL;
 
 STATIC void getSECertSupport(char *seCert_support);
 static int getDeviceConfigFile();
@@ -661,9 +661,9 @@ int main(int argc, char *argv[])
 		}
     }
 
-    LogInfo("WEBPA_SERVER_URL = %s\n", WEBPA_SERVER_URL);
-    LogInfo("TOKEN_SERVER_URL = %s\n", TOKEN_SERVER_URL);
-    LogInfo("DNS_TEXT_URL = %s\n", DNS_TEXT_URL);
+     LogInfo("WEBPA_SERVER_URL = %s\n", (WEBPA_SERVER_URL != NULL) ? WEBPA_SERVER_URL : "(null)");
+     LogInfo("TOKEN_SERVER_URL = %s\n", (TOKEN_SERVER_URL != NULL) ? TOKEN_SERVER_URL : "(null)");
+     LogInfo("DNS_TEXT_URL = %s\n", (DNS_TEXT_URL != NULL) ? DNS_TEXT_URL : "(null)");
 
     if (partner_id[0] != '\0')
     {
