@@ -28,7 +28,7 @@ if CCSP_ARCH_MIPS
 AM_LDFLAGS += -llmapi
 endif
 parodusStart_SOURCES = start_parodus.c
-startParodus_SOURCES += rdkb/rdkb_imp.c
+parodusStart_SOURCES += rdkb/rdkb_imp.c
 
 if CCSP_ARCH_ARM
 parodusStart_CPPFLAGS = -D_ANSC_LINUX -D_ANSC_USER 
