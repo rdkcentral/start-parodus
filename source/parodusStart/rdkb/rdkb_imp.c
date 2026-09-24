@@ -38,6 +38,9 @@
 #include <ccsp/cm_hal.h>
 #include <sysevent/sysevent.h>
 #include <syscfg/syscfg.h>
+#if defined(_PLATFORM_RASPBERRYPI_) || defined(_PLATFORM_TURRIS_) || defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
+#include "ccsp_vendor.h"
+#endif
 #if defined(_COSA_BCM_MIPS_)
 #include <ccsp/dpoe_hal.h>
 #endif
