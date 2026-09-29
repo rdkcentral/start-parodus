@@ -33,6 +33,9 @@
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
+#if !(_COSA_BCM_MIPS_ || _COSA_DRG_TPG_ || CONFIG_CISCO)
+#include <autoconf.h>
+#endif
 #include <limits.h>
 #include <ccsp/platform_hal.h>
 #include <ccsp/cm_hal.h>
@@ -1104,13 +1107,13 @@ void getBootTime(unsigned int *bootTime, int *waitTime)
     struct timeval currentTime;
     unsigned int uptime;
 
-    if (waitTime == NULL)
+    if (bootTime == NULL || waitTime == NULL)
     {
         LogError("Invalid boot time arguments\n");
         return;
     }
 
-    while (!bootTime)
+    while (*bootTime == 0)
     {
         if (sysinfo(&systemInfo))
         {
@@ -1120,23 +1123,23 @@ void getBootTime(unsigned int *bootTime, int *waitTime)
         {
             uptime = systemInfo.uptime;
             gettimeofday(&currentTime, NULL);
-            bootTime = (unsigned int)(currentTime.tv_sec - uptime);
+            *bootTime = (unsigned int)(currentTime.tv_sec - uptime);
         }
 
-        if (bootTime > 0 && bootTime < UINT_MAX)
+        if (*bootTime > 0 && *bootTime < UINT_MAX)
         {
-            LogInfo("bootTime is %u\n", bootTime);
+            LogInfo("bootTime is %u\n", *bootTime);
         }
         else if (*waitTime >= 60)
         {
-            LogError("boot_time is %u. Unable to get valid bootTime even after wait of 60s. Hence setting bootTime value to 0.\n", bootTime);
-            bootTime = 0;
+            LogError("boot_time is %u. Unable to get valid bootTime even after wait of 60s. Hence setting bootTime value to 0.\n", *bootTime);
+            *bootTime = 0;
             break;
         }
         else
         {
-            LogError("boot_time %u is not valid, retry after 10s\n", bootTime);
-            bootTime = 0;
+            LogError("boot_time %u is not valid, retry after 10s\n", *bootTime);
+            *bootTime = 0;
             sleep(10);
             *waitTime += 10;
         }
