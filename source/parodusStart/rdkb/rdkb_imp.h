@@ -44,3 +44,4 @@ void rdkb_log(int level, const char *msg, ...);
 #define LogError(...) rdkb_log(RDKB_LOG_ERROR, __VA_ARGS__)
 
 char *getWebpaUrl(const char *buildType);
+#endif
