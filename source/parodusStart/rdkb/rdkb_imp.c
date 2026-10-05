@@ -98,6 +98,7 @@ static char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
 static void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
 //static int get_psm_values(char *names[], char *values[], int count);
 static void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
+STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count);
 
 void rdkb_log(int level, const char *msg, ...)
 {
@@ -1850,7 +1851,9 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
 	       	free_sync_db_items(paramCount, psmValues, sysCfgValues);
 		    /* Coverity Fix CID:53686 RESOURCE_LEAK  */
             if( cfgJson_firmware != NULL)
+            {
                 free(cfgJson_firmware);
+            }
 	        return -1;
 	    }
 	    else
@@ -2052,4 +2055,24 @@ static void free_sync_db_items(int paramCount, char *psmValues[], char *sysCfgVa
 	    	sysCfgValues[i] = NULL;
 	    }
 	}
+}
+
+STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count)
+{
+    int i = 0;
+    errno_t rc = -1;
+    for(i=0; i<count; i++)
+    {
+    	char temp[MAX_VALUE_SIZE] ={'\0'};
+        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0)
+        {
+	    	values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
+                rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
+                if(rc != EOK)
+                {
+                    ERR_CHK(rc);
+                    return;
+                }
+        }
+    }
 }
