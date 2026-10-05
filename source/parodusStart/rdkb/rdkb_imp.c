@@ -98,7 +98,7 @@ static char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
 static void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
 //static int get_psm_values(char *names[], char *values[], int count);
 static void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
-STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count);
+static void getValuesFromSysCfgDb(char *names[], char **values,int count);
 
 void rdkb_log(int level, const char *msg, ...)
 {
@@ -2055,7 +2055,7 @@ static void free_sync_db_items(int paramCount, char *psmValues[], char *sysCfgVa
 	}
 }
 
-STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count)
+static void getValuesFromSysCfgDb(char *names[], char **values,int count)
 {
     int i = 0;
     errno_t rc = -1;
