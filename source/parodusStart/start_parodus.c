@@ -236,6 +236,7 @@ int main(int argc, char *argv[])
         free(webpaUrl);
         webpaUrl = NULL;
     }
+    /* Need only for RDKB platforms*/
     syncPsmDbOnUpgrade(firmwareVersion);
 
     if (startParodusProcess(command) != 0)

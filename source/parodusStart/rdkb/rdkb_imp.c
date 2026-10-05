@@ -95,8 +95,9 @@ int s_sysevent_connect(token_t *out_se_token);
 
 FILE *g_fArmConsoleLog = NULL;
 static char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
-
-static int sync_get_psm_values(char *names[], char *values[], int count);
+static void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
+static int get_psm_values(char *names[], char *values[], int count);
+static void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
 
 void rdkb_log(int level, const char *msg, ...)
 {
@@ -1296,6 +1297,29 @@ static void sync_free_values(char *values[], int count)
     }
 }
 
+static void getValuesFromPsmDb(char *names[], char **values,int count)
+{
+    int i=0;
+    char* prefixNames[count];
+    char* buf = NULL;
+    buf = (char*) malloc(MAX_BUF_SIZE);
+    if(buf != NULL)
+    {
+        for(i=0; i<count; i++)
+        {
+            snprintf(buf, MAX_BUF_SIZE, "%s%s", pathPrefix, names[i]);
+	    prefixNames[i] = strdup(buf);
+        }
+        free(buf);
+        getWebpaValuesFromPsmDb( prefixNames, values, count );
+    }
+    else
+    {
+        LogError("getValuesFromPsmDb Failed\n");	    
+    } 
+}
+
+#if 0
 static int sync_get_psm_values(char *names[], char *values[], int count)
 {
     FILE *output;
@@ -1352,7 +1376,7 @@ static int sync_get_psm_values(char *names[], char *values[], int count)
     pclose(output);
     return 0;
 }
-
+#endif
 static int getPartnerUrl(const char *partnerId, const char *paramName, char **value)
 {
     FILE *file;
@@ -1436,6 +1460,74 @@ static void updatePartnerUrls(const char *partnerId, char **serverUrl,
     }
 }
 
+static void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
+{
+    FILE* out = NULL;
+    errno_t rc = -1;
+    char command[MAX_BUF_SIZE]={'\0'};
+    char buf[MAX_BUF_SIZE] = {'\0'};
+    char tempBuf[MAX_BUF_SIZE] ={'\0'};
+    int offset = 0, i=0, index=0;
+    char temp[MAX_VALUE_SIZE] = {'\0'};
+    const size_t fmtBufSize = 32;
+    char fmt[fmtBufSize];
+
+    for(i=0; i<count; i++)
+    {
+        rc = sprintf_s(tempBuf + offset, sizeof(tempBuf) - offset, " %dX %s", i, names[i]);
+        if(rc < EOK)
+        {
+           ERR_CHK(rc);
+           return;
+        }
+        offset += rc;
+    }
+    rc = sprintf_s(command, sizeof(command),"psmcli get -e%s", tempBuf);
+    if(rc < EOK)
+    {
+        ERR_CHK(rc);
+        return;
+    }
+    LogInfo("command : %s\n",command);
+
+    out = popen(command, "r");
+    if(out)
+    {
+        for(i=0; i<count; i++)
+        {
+            if(fgets(buf, sizeof(buf), out) == NULL)
+                LogError("fgets() error\n");
+            if(strlen(buf) > 0)
+            {
+                char *t = strrchr(buf, '"');
+                if(t)
+                    *t = '\0';
+		snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
+		if (sscanf(buf, fmt, &index, temp) == 2 && index == i) {
+                    values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
+                    rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
+                    if(rc != EOK)
+                    {
+                        ERR_CHK(rc);
+						pclose(out);
+                        return;
+                    }
+                }
+            }
+            if(feof(out))
+            {
+                LogInfo("End of file reached\n");
+                break;
+            }
+        }
+        pclose(out);
+    }
+    else
+    {
+        LogError("Failed to execute command\n");
+    }
+}
+
 int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl,
                    char **tokenServerUrl, char **dnsTextUrl)
 {
@@ -1444,10 +1536,9 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
         "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL",
         "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL"
     };
-    char *values[3] = {NULL};
+    char *psmValues[MAX_VALUE_SIZE] = {NULL};
     char *serverUrl = NULL;
-    int status = -1;
-
+    int i, paramCount = 0;
     if (webpaUrl == NULL || tokenServerUrl == NULL || dnsTextUrl == NULL)
     {
         LogError("Invalid WebPA URL output arguments\n");
@@ -1458,22 +1549,28 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
     *tokenServerUrl = NULL;
     *dnsTextUrl = NULL;
 
-    if (sync_get_psm_values(paramNames, values, 3) != 0)
+    paramCount = sizeof(paramNames)/sizeof(paramNames);
+    getWebpaValuesFromPsmDb(paramNames, psmValues, paramCount)
+    for(i=0;i<paramCount;i++)
     {
-        goto cleanup;
+        if(psmValues[i])
+        {    
+	        if(i==0) {		
+			    serverUrl = strdup(psmValues[i]);
+		    } else if(i==1) {
+			     *tokenServerUrl = strdup(psmValues[i]);
+		    } else if(i==2) {
+			     *dnsTextUrl = strdup(psmValues[i]);
+		    }     
+		}   
     }
 
-    if (values[0] != NULL)
-    {
-        serverUrl = strdup(values[0]);
-    }
-    if (values[1] != NULL)
-    {
-        *tokenServerUrl = strdup(values[1]);
-    }
-    if (values[2] != NULL)
-    {
-        *dnsTextUrl = strdup(values[2]);
+	for(i=0; i<paramCount; i++)
+	{
+		if(psmValues[i])
+		{
+			free(psmValues[i]);
+		}
     }
 
     if (partnerId != NULL && partnerId[0] != '\0')
@@ -1483,19 +1580,16 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
 
     if (*webpaUrl == NULL || (*webpaUrl)[0] == '\0')
     {
+        LogInfo("Setting webpaUrl to default server IP\n");
         if (serverUrl != NULL && serverUrl[0] != '\0')
         {
-            free(*webpaUrl);
+            if(webpaUrl != NULL)
+            {
+                free(*webpaUrl);
+                webpaUrl = NULL;
+            }                
             *webpaUrl = strdup(serverUrl);
         }
-    }
-
-    if ((values[0] != NULL && serverUrl == NULL) ||
-        (values[1] != NULL && *tokenServerUrl == NULL) ||
-        (values[2] != NULL && *dnsTextUrl == NULL))
-    {
-        LogError("Failed to allocate WebPA URL values\n");
-        goto cleanup;
     }
 
     if (*webpaUrl == NULL || (*webpaUrl)[0] == '\0')
@@ -1509,79 +1603,83 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
             serverUrl != NULL ? serverUrl : "(null)",
             *tokenServerUrl != NULL ? *tokenServerUrl : "(null)",
             *dnsTextUrl != NULL ? *dnsTextUrl : "(null)");
-    status = 0;
-
+    return 0;        
 cleanup:
-    free(values[0]);
-    free(values[1]);
-    free(values[2]);
-    free(serverUrl);
+    if (serverUrl != NUU) free(serverUrl);
     if (status != 0)
     {
-        free(*webpaUrl);
-        free(*tokenServerUrl);
-        free(*dnsTextUrl);
+        if (*webpaUrl != NULL) free(*webpaUrl);
+        if ( *tokenServerUrl != NULL) free(*tokenServerUrl);
+        if (*dnsTextUrl != NULL) free(*dnsTextUrl);
         *webpaUrl = NULL;
         *tokenServerUrl = NULL;
         *dnsTextUrl = NULL;
     }
-    return status;
+    return -1;
 }
 
-static int sync_set_psm_values(char *names[], char *values[], int count)
+static int setValuesToPsmDb(char *names[], char **values,int count)
 {
-    FILE *output;
-    char command[MAX_BUF_SIZE] = {'\0'};
-    char request[MAX_BUF_SIZE] = {'\0'};
-    char buffer[32] = {'\0'};
+    FILE* out = NULL;
+    char command[MAX_BUF_SIZE]={'\0'};
+    char buf[MAX_BUF_SIZE] = {0};
+    int i = 0, ret=0;
+    char tempBuf[MAX_BUF_SIZE] ={0};
     int offset = 0;
-    int result = 0;
-    int i;
-    int rc;
+    errno_t rc = -1;
 
-    for (i = 0; i < count; i++)
+    for(i=0; i<count; i++)
     {
-        rc = sprintf_s(request + offset, sizeof(request) - offset,
-                       " %s%s %s", PSM_PATH_PREFIX, names[i], values[i]);
-        if (rc < EOK)
+        rc = sprintf_s(tempBuf + offset, sizeof(tempBuf) - offset, " %s%s %s", pathPrefix,names[i], values[i]);
+        if(rc < EOK)
         {
-            ERR_CHK(rc);
-            return -1;
+           ERR_CHK(rc);
+           return -1;
         }
         offset += rc;
     }
-
-    rc = sprintf_s(command, sizeof(command), "psmcli set%s", request);
-    if (rc < EOK)
+    rc = sprintf_s(command, sizeof(command),"psmcli set%s", tempBuf);
+    if(rc < EOK)
     {
         ERR_CHK(rc);
         return -1;
     }
-
-    output = popen(command, "r");
-    if (output == NULL)
+    LogInfo("command : %s\n",command);
+    out = popen(command, "r");
+    if(out)
     {
-        LogError("Failed to execute PSM set command\n");
+        for(i=0; i<count; i++)
+        {
+            if(fgets(buf, sizeof(buf), out) == NULL)
+                LogError("fgets() error\n");
+            sscanf(buf, "%d\n", &ret);
+            if(ret != 100)
+            {
+                LogError("Failed to setValuesToPsmDb\n");
+                pclose(out);
+                return -1;
+            }
+	        if(feof(out))
+	        {
+		        LogInfo("End of file reached\n");
+		    break;
+	        }
+        }
+        pclose(out);
+    }
+    else
+    {
+        LogError("Failed to execute command\n");
         return -1;
     }
-
-    for (i = 0; i < count; i++)
-    {
-        if (fgets(buffer, sizeof(buffer), output) == NULL || sscanf(buffer, "%d", &result) != 1 || result != 100)
-        {
-            LogError("Failed to set PSM value\n");
-            pclose(output);
-            return -1;
-        }
-    }
-
-    pclose(output);
     return 0;
 }
 
+#if 0
 static int syncXpcParamsOnUpgrade(char *firmwareVersion)
 {
     char lastRebootReason[128] = {'\0'};
+    
     char *paramList[] = {"X_COMCAST-COM_CMC", "X_COMCAST-COM_CID", "X_COMCAST-COM_SyncProtocolVersion"};
     char *psmValues[3] = {NULL};
     char *sysCfgValues[3] = {NULL};
@@ -1599,6 +1697,7 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
     errno_t rc;
 
     syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
+        
     configFile = fopen(WEBPA_CFG_FILE, "r");
     if (configFile != NULL)
     {
@@ -1692,6 +1791,152 @@ cleanup:
     sync_free_values(sysCfgValues, 3);
     return status;
 }
+#endif
+static int syncXpcParamsOnUpgrade(char *firmwareVersion)
+{
+    char lastRebootReason[128] = {'\0'};
+	int paramCount = 0, status = 0, i = 0;
+	cJSON *out = NULL;
+	char *cfgJson_firmware = NULL;
+    char *paramList[] = {"X_COMCAST-COM_CMC","X_COMCAST-COM_CID","X_COMCAST-COM_SyncProtocolVersion"};
+	char *psmValues[MAX_VALUE_SIZE] = {'\0'};
+	char *sysCfgValues[MAX_VALUE_SIZE] = {'\0'};
+	errno_t rc = -1;
+    int ind = -1;
+    int parodus_enable = 0;
+
+    syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
+
+	paramCount = sizeof(paramList)/sizeof(paramList[0]);
+	getValueFromCfgJson( WEBPA_CFG_FIRMWARE_VER, &cfgJson_firmware, &out);
+	char *outtext = cJSON_Print(out);
+	if(outtext)
+	{
+		LogInfo(" Returned json content is: %s\n", outtext);
+		free(outtext);
+	}
+	if(out != NULL)
+	{
+		LogInfo("cfgJson_firmware fetched from webpa_cfg.json is %s\n", cfgJson_firmware);
+#ifdef UPDATE_CONFIG_FILE
+		char *cJsonOut =NULL;
+        int configUpdateStatus = -1;
+        cJSON_ReplaceItemInObject(out, WEBPA_CFG_FIRMWARE_VER, cJSON_CreateString(firmwareVersion));
+		
+		cJsonOut = cJSON_Print(out);
+		LogInfo("Updated json content is %s\n", cJsonOut);
+		configUpdateStatus = writeToJson(cJsonOut);
+
+		if(configUpdateStatus == 0)
+		{
+			LogInfo("Updated current Firmware version to config file\n");
+		}
+		else
+		{
+			LogError("Error in updating current Firmware version to config file\n");
+		}
+		if(cJsonOut != NULL)
+		{
+			free(cJsonOut);
+			cJsonOut = NULL;
+		}
+#endif
+		cJSON_Delete(out);
+	}
+
+	else
+	{
+		LogError("Error in fetching data from webpa_cfg.json file\n");
+	}
+
+    getValuesFromPsmDb(paramList, psmValues, paramCount);
+
+    for(i = 0; i<paramCount; i++)
+	{
+	    if(psmValues[i] == NULL)
+	    {
+	      	LogInfo("PsmDb-> value is NULL for %s\n",paramList[i]);
+	       	free_sync_db_items(paramCount, psmValues, sysCfgValues);
+		    /* Coverity Fix CID:53686 RESOURCE_LEAK  */
+            if( cfgJson_firmware != NULL)
+                free(cfgJson_firmware);
+	        return -1;
+	    }
+	    else
+	    {
+	        LogInfo("PsmDb-> %s value is %s\n",paramList[i], psmValues[i]);
+	    }
+	}
+	
+	/* To check if it is an upgrade from release image to parodus ON */
+    rc = strcmp_s("Software_upgrade",strlen("Software_upgrade"),lastRebootReason,&ind);
+    ERR_CHK(rc);
+    if((ind == 0) && (rc == EOK))
+    {
+        parodus_enable =1;
+    }
+    else if ((cfgJson_firmware != NULL) && (strlen(cfgJson_firmware)>0))
+    {
+        rc = strcmp_s(firmwareVersion,strlen(firmwareVersion),cfgJson_firmware,&ind);
+        ERR_CHK(rc);
+        if((ind != 0) && (rc == EOK))
+        {
+            parodus_enable = 1;
+        }
+    }
+		
+    if( parodus_enable && ((psmValues[0] != NULL && atoi(psmValues[0]) ==0) && (psmValues[1] != NULL && atoi(psmValues[1]) ==0) && (psmValues[2] != NULL && atoi(psmValues[2]) ==0))) 
+	{
+		LogInfo("sync for bbhm and syscfg is required. Proceeding with DB sync..\n");
+               getValuesFromSysCfgDb(paramList, sysCfgValues, paramCount);
+		
+		if(cfgJson_firmware != NULL)
+		{
+			free(cfgJson_firmware);
+			cfgJson_firmware = NULL;
+		}
+		
+		for(i=0; i<paramCount; i++)
+		{
+			if(sysCfgValues[i] == NULL)
+	       	{
+	       		LogInfo("SysCfgDb-> value is NULL for %s\n", paramList[i]);
+	       		free_sync_db_items(paramCount, psmValues, sysCfgValues);
+	       		return -2;
+	       	}
+	       	else
+	       	{
+	       		LogInfo("SysCfgDb-> %s value is %s\n", paramList[i], sysCfgValues[i]);
+	       	}
+		}
+		
+		status = setValuesToPsmDb(paramList, sysCfgValues, paramCount);
+		if(status == 0)
+		{
+		    LogInfo("Successfully set values to PSM DB\n");
+    	}
+    	else
+    	{
+    		LogError("Failed to set values to PSM DB\n");
+    		free_sync_db_items(paramCount, psmValues, sysCfgValues);
+    		return -2;
+    	}
+    }
+	else
+	{
+		LogInfo("Sync for bbhm and syscfg is not required\n");
+		free_sync_db_items(paramCount, psmValues, sysCfgValues);
+		if(cfgJson_firmware != NULL)
+		{
+			free(cfgJson_firmware);
+			cfgJson_firmware = NULL;
+		}
+		return -1;
+	}
+		
+	free_sync_db_items(paramCount, psmValues, sysCfgValues);
+	return 0;
+}
 
 static void waitForPSMHealth(const char *compName)
 {
@@ -1757,17 +2002,20 @@ static void waitForPSMHealth(const char *compName)
     LogInfo("%s component health is green, continue\n", parameterName);
 }
 
-int syncPsmDbOnUpgrade(char *firmwareVersion)
+void syncPsmDbOnUpgrade(char *firmwareVersion)
 {
     char *paramList[] = {
         "X_COMCAST-COM_CMC",
         "X_COMCAST-COM_CID",
         "X_COMCAST-COM_SyncProtocolVersion"
     };
-    char *psmValues[3] = {NULL};
+    char *psmValues[MAX_VALUE_SIZE] = {NULL};
     int syncStatus;
+    int i, paramCount = 0;
 
+    /* Wait till PSM health is green before PSM DB sync */
     waitForPSMHealth(PSM_COMPONENT_NAME);
+
     syncStatus = syncXpcParamsOnUpgrade(firmwareVersion);
 
     if (syncStatus == 0)
@@ -1783,18 +2031,34 @@ int syncPsmDbOnUpgrade(char *firmwareVersion)
         LogInfo("DB sync is not required or failed to sync!!\n");
     }
 
-    if (sync_get_psm_values(paramList, psmValues, 3) == 0)
-    {
-        LogInfo("DB details are %s = %s %s = %s %s = %s\n",
-                paramList[0], psmValues[0] != NULL ? psmValues[0] : "(null)",
-                paramList[1], psmValues[1] != NULL ? psmValues[1] : "(null)",
-                paramList[2], psmValues[2] != NULL ? psmValues[2] : "(null)");
-    }
-    else
-    {
-        LogError("Failed to fetch PSM DB details\n");
-    }
-    sync_free_values(psmValues, 3);
+    paramCount = sizeof(paramList)/sizeof(paramList[0]);
+    getValuesFromPsmDb(paramList, psmValues, paramCount);
+	LogInfo("DB details are %s = %s %s = %s %s = %s\n",paramList[0],psmValues[0],paramList[1],psmValues[1],paramList[2],psmValues[2]);
+	
+    for(i=0; i<paramCount; i++)
+	{
+		if(psmValues[i])
+		{
+			free(psmValues[i]);
+		}
+	}
+}
 
-    return syncStatus;
+static void free_sync_db_items(int paramCount, char *psmValues[], char *sysCfgValues[])
+{
+	int i;
+	for(i = 0; i<paramCount; i++)
+	{
+		if(psmValues[i] != NULL)
+		{
+	    	free(psmValues[i]);
+	    	psmValues[i] = NULL;
+	    }
+	       	
+	    if(sysCfgValues[i] != NULL)
+		{
+	    	free(sysCfgValues[i]);
+	    	sysCfgValues[i] = NULL;
+	    }
+	}
 }
