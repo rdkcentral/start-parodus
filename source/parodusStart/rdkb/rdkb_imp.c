@@ -96,7 +96,7 @@ int s_sysevent_connect(token_t *out_se_token);
 FILE *g_fArmConsoleLog = NULL;
 static char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
 static void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
-static int get_psm_values(char *names[], char *values[], int count);
+//static int get_psm_values(char *names[], char *values[], int count);
 static void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
 
 void rdkb_log(int level, const char *msg, ...)
@@ -1286,6 +1286,7 @@ void getRebootReason(char *reason, size_t reasonLen)
     LogInfo("Modified lastRebootReason is %s\n", reason);
 }
 
+#if 0
 static void sync_free_values(char *values[], int count)
 {
     int i;
@@ -1296,7 +1297,7 @@ static void sync_free_values(char *values[], int count)
         values[i] = NULL;
     }
 }
-
+#endif
 static void getValuesFromPsmDb(char *names[], char **values,int count)
 {
     int i=0;
@@ -1307,8 +1308,8 @@ static void getValuesFromPsmDb(char *names[], char **values,int count)
     {
         for(i=0; i<count; i++)
         {
-            snprintf(buf, MAX_BUF_SIZE, "%s%s", pathPrefix, names[i]);
-	    prefixNames[i] = strdup(buf);
+            snprintf(buf, MAX_BUF_SIZE, "%s%s", PSM_PATH_PREFIX, names[i]);
+	        prefixNames[i] = strdup(buf);
         }
         free(buf);
         getWebpaValuesFromPsmDb( prefixNames, values, count );
@@ -1549,9 +1550,9 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
     *tokenServerUrl = NULL;
     *dnsTextUrl = NULL;
 
-    paramCount = sizeof(paramNames)/sizeof(paramNames);
-    getWebpaValuesFromPsmDb(paramNames, psmValues, paramCount)
-    for(i=0;i<paramCount;i++)
+    paramCount = sizeof(paramNames)/sizeof(paramNames[0]);
+    getWebpaValuesFromPsmDb(paramNames, psmValues, paramCount);
+    for(i=0; i<paramCount; i++)
     {
         if(psmValues[i])
         {    
@@ -1595,7 +1596,14 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
     if (*webpaUrl == NULL || (*webpaUrl)[0] == '\0')
     {
         LogError("Unable to determine WebPA URL\n");
-        goto cleanup;
+        if (serverUrl != NULL) free(serverUrl);
+        if (*webpaUrl != NULL) free(*webpaUrl);
+        if ( *tokenServerUrl != NULL) free(*tokenServerUrl);
+        if (*dnsTextUrl != NULL) free(*dnsTextUrl);
+        *webpaUrl = NULL;
+        *tokenServerUrl = NULL;
+        *dnsTextUrl = NULL;
+        return -1;
     }
 
     LogInfo("WEBPA URL values fetched: webpa=%s server=%s token=%s dns=%s\n",
@@ -1603,19 +1611,7 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
             serverUrl != NULL ? serverUrl : "(null)",
             *tokenServerUrl != NULL ? *tokenServerUrl : "(null)",
             *dnsTextUrl != NULL ? *dnsTextUrl : "(null)");
-    return 0;        
-cleanup:
-    if (serverUrl != NUU) free(serverUrl);
-    if (status != 0)
-    {
-        if (*webpaUrl != NULL) free(*webpaUrl);
-        if ( *tokenServerUrl != NULL) free(*tokenServerUrl);
-        if (*dnsTextUrl != NULL) free(*dnsTextUrl);
-        *webpaUrl = NULL;
-        *tokenServerUrl = NULL;
-        *dnsTextUrl = NULL;
-    }
-    return -1;
+    return 0;
 }
 
 static int setValuesToPsmDb(char *names[], char **values,int count)
@@ -1630,7 +1626,7 @@ static int setValuesToPsmDb(char *names[], char **values,int count)
 
     for(i=0; i<count; i++)
     {
-        rc = sprintf_s(tempBuf + offset, sizeof(tempBuf) - offset, " %s%s %s", pathPrefix,names[i], values[i]);
+        rc = sprintf_s(tempBuf + offset, sizeof(tempBuf) - offset, " %s%s %s", PSM_PATH_PREFIX, names[i], values[i]);
         if(rc < EOK)
         {
            ERR_CHK(rc);
@@ -1796,7 +1792,7 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
 {
     char lastRebootReason[128] = {'\0'};
 	int paramCount = 0, status = 0, i = 0;
-	cJSON *out = NULL;
+	//cJSON *out = NULL;
 	char *cfgJson_firmware = NULL;
     char *paramList[] = {"X_COMCAST-COM_CMC","X_COMCAST-COM_CID","X_COMCAST-COM_SyncProtocolVersion"};
 	char *psmValues[MAX_VALUE_SIZE] = {'\0'};
@@ -1805,50 +1801,45 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
     int ind = -1;
     int parodus_enable = 0;
 
+    char *configFirmware = NULL;
+    FILE *configFile = NULL;
+    cJSON *configJson = NULL;
+    cJSON *firmwareItem = NULL;
+    char *configData = NULL;
+    char *updatedConfig = NULL;
+    long configLength;
+
     syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
 
-	paramCount = sizeof(paramList)/sizeof(paramList[0]);
-	getValueFromCfgJson( WEBPA_CFG_FIRMWARE_VER, &cfgJson_firmware, &out);
-	char *outtext = cJSON_Print(out);
-	if(outtext)
-	{
-		LogInfo(" Returned json content is: %s\n", outtext);
-		free(outtext);
-	}
-	if(out != NULL)
-	{
-		LogInfo("cfgJson_firmware fetched from webpa_cfg.json is %s\n", cfgJson_firmware);
-#ifdef UPDATE_CONFIG_FILE
-		char *cJsonOut =NULL;
-        int configUpdateStatus = -1;
-        cJSON_ReplaceItemInObject(out, WEBPA_CFG_FIRMWARE_VER, cJSON_CreateString(firmwareVersion));
-		
-		cJsonOut = cJSON_Print(out);
-		LogInfo("Updated json content is %s\n", cJsonOut);
-		configUpdateStatus = writeToJson(cJsonOut);
 
-		if(configUpdateStatus == 0)
-		{
-			LogInfo("Updated current Firmware version to config file\n");
-		}
-		else
-		{
-			LogError("Error in updating current Firmware version to config file\n");
-		}
-		if(cJsonOut != NULL)
-		{
-			free(cJsonOut);
-			cJsonOut = NULL;
-		}
-#endif
-		cJSON_Delete(out);
-	}
+    configFile = fopen(WEBPA_CFG_FILE, "r");
+    if (configFile != NULL)
+    {
+        fseek(configFile, 0, SEEK_END);
+        configLength = ftell(configFile);
+        fseek(configFile, 0, SEEK_SET);
+        if (configLength > 0)
+        {
+            configData = malloc((size_t)configLength + 1);
+            if (configData != NULL && fread(configData, 1, (size_t)configLength, configFile) == (size_t)configLength)
+            {
+                configData[configLength] = '\0';
+                configJson = cJSON_Parse(configData);
+            }
+        }
+        fclose(configFile);
+    }
 
-	else
-	{
-		LogError("Error in fetching data from webpa_cfg.json file\n");
-	}
+    if (configJson != NULL)
+    {
+        firmwareItem = cJSON_GetObjectItem(configJson, WEBPA_CFG_FIRMWARE_VER);
+        if (firmwareItem != NULL && cJSON_IsString(firmwareItem) && firmwareItem->valuestring != NULL)
+        {
+            configFirmware = firmwareItem->valuestring;
+        }
+    }
 
+    paramCount = sizeof(paramList)/sizeof(paramList[0]);
     getValuesFromPsmDb(paramList, psmValues, paramCount);
 
     for(i = 0; i<paramCount; i++)

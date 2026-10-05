@@ -54,6 +54,6 @@ void getSerialNumber(char *serialNumber, size_t len);
 void getFirmwareName(char *fwName, size_t fwNameLen);
 void getManufacturer(char *manufacturer, size_t len);
 void getRebootReason(char *reason, size_t reasonLen);
-int syncPsmDbOnUpgrade(char *firmwareVersion);
+void syncPsmDbOnUpgrade(char *firmwareVersion);
 
 #endif /* START_PARODUS_H */
