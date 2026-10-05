@@ -1801,13 +1801,11 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
 	errno_t rc = -1;
     int ind = -1;
     int parodus_enable = 0;
-
-    char *configFirmware = NULL;
     FILE *configFile = NULL;
     cJSON *configJson = NULL;
     cJSON *firmwareItem = NULL;
     char *configData = NULL;
-    char *updatedConfig = NULL;
+    //char *updatedConfig = NULL;
     long configLength;
 
     syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
@@ -1836,7 +1834,7 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
         firmwareItem = cJSON_GetObjectItem(configJson, WEBPA_CFG_FIRMWARE_VER);
         if (firmwareItem != NULL && cJSON_IsString(firmwareItem) && firmwareItem->valuestring != NULL)
         {
-            configFirmware = firmwareItem->valuestring;
+            cfgJson_firmware = firmwareItem->valuestring;
         }
     }
 
