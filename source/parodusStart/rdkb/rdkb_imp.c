@@ -1052,7 +1052,7 @@ char *getWebpaUrl(const char *buildType)
     }
 
 #if defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
-    file = fopen(DEVICE_PROPS_FILE, "r");
+    FILE *file = fopen(DEVICE_PROPS_FILE, "r");
     if (file != NULL)
     {
         char line[255] = {'\0'};
@@ -1585,11 +1585,11 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
         LogInfo("Setting webpaUrl to default server IP\n");
         if (serverUrl != NULL && serverUrl[0] != '\0')
         {
-            if(webpaUrl != NULL)
+            if(*webpaUrl != NULL)
             {
                 free(*webpaUrl);
-                webpaUrl = NULL;
-            }                
+                *webpaUrl = NULL;
+            }
             *webpaUrl = strdup(serverUrl);
         }
     }
@@ -1612,6 +1612,7 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
             serverUrl != NULL ? serverUrl : "(null)",
             *tokenServerUrl != NULL ? *tokenServerUrl : "(null)",
             *dnsTextUrl != NULL ? *dnsTextUrl : "(null)");
+    free(serverUrl);
     return 0;
 }
 
@@ -1789,11 +1790,9 @@ cleanup:
     return status;
 }
 #endif
-static int syncXpcParamsOnUpgrade(char *firmwareVersion)
+static int syncXpcParamsOnUpgrade(char *lastRebootReason, char *firmwareVersion)
 {
-    char lastRebootReason[128] = {'\0'};
 	int paramCount = 0, status = 0, i = 0;
-	//cJSON *out = NULL;
 	char *cfgJson_firmware = NULL;
     char *paramList[] = {"X_COMCAST-COM_CMC","X_COMCAST-COM_CID","X_COMCAST-COM_SyncProtocolVersion"};
 	char *psmValues[MAX_VALUE_SIZE] = {'\0'};
@@ -1805,11 +1804,7 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
     cJSON *configJson = NULL;
     cJSON *firmwareItem = NULL;
     char *configData = NULL;
-    //char *updatedConfig = NULL;
     long configLength;
-
-    syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
-
 
     configFile = fopen(WEBPA_CFG_FILE, "r");
     if (configFile != NULL)
@@ -1828,14 +1823,42 @@ static int syncXpcParamsOnUpgrade(char *firmwareVersion)
         }
         fclose(configFile);
     }
+    free(configData);
 
     if (configJson != NULL)
     {
         firmwareItem = cJSON_GetObjectItem(configJson, WEBPA_CFG_FIRMWARE_VER);
         if (firmwareItem != NULL && cJSON_IsString(firmwareItem) && firmwareItem->valuestring != NULL)
         {
-            cfgJson_firmware = firmwareItem->valuestring;
+            cfgJson_firmware = strdup(firmwareItem->valuestring);
         }
+        LogInfo("cfgJson_firmware fetched from webpa_cfg.json is %s\n",
+                cfgJson_firmware != NULL ? cfgJson_firmware : "(null)");
+#ifdef UPDATE_CONFIG_FILE
+        cJSON_ReplaceItemInObject(configJson, WEBPA_CFG_FIRMWARE_VER, cJSON_CreateString(firmwareVersion));
+        char *updatedConfig = cJSON_Print(configJson);
+        if (updatedConfig != NULL)
+        {
+            LogInfo("Updated json content is %s\n", updatedConfig);
+            configFile = fopen(WEBPA_CFG_FILE, "w");
+            if (configFile != NULL)
+            {
+                fwrite(updatedConfig, strlen(updatedConfig), 1, configFile);
+                fclose(configFile);
+                LogInfo("Updated current Firmware version to config file\n");
+            }
+            else
+            {
+                LogError("Error in updating current Firmware version to config file\n");
+            }
+            free(updatedConfig);
+        }
+#endif
+        cJSON_Delete(configJson);
+    }
+    else
+    {
+        LogError("Error in fetching data from webpa_cfg.json file\n");
     }
 
     paramCount = sizeof(paramList)/sizeof(paramList[0]);
@@ -2002,13 +2025,16 @@ void syncPsmDbOnUpgrade(char *firmwareVersion)
         "X_COMCAST-COM_SyncProtocolVersion"
     };
     char *psmValues[MAX_VALUE_SIZE] = {NULL};
+    char lastRebootReason[128] = {'\0'};
     int syncStatus;
     int i, paramCount = 0;
+
+    syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
 
     /* Wait till PSM health is green before PSM DB sync */
     waitForPSMHealth(PSM_COMPONENT_NAME);
 
-    syncStatus = syncXpcParamsOnUpgrade(firmwareVersion);
+    syncStatus = syncXpcParamsOnUpgrade(lastRebootReason, firmwareVersion);
 
     if (syncStatus == 0)
     {

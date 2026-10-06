@@ -136,7 +136,7 @@ int main(int argc, char *argv[])
 
     if (getDeviceMac(deviceMac, sizeof(deviceMac)) != 0)
     {
-        return -1;
+        LogError("Unable to get device MAC, continuing\n");
     }
 
     getBootTime(&bootTime, &wait_time);
@@ -149,7 +149,7 @@ int main(int argc, char *argv[])
 
     if (getPartnerId(partner_id, sizeof(partner_id)) != 0)
     {
-        goto RETURN_ERROR;
+        LogError("Unable to get partner ID, continuing\n");
     }
 
     if (getWebpaConfig(build_type, partner_id, &webpaUrl,
