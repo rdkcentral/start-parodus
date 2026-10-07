@@ -39,6 +39,12 @@
 #define MAX_SERVER_URL_SIZE           64
 #define MAX_BUILD_LEN                 16
 #define MAX_PARTNERID_LEN             64
+#define BUFFER_LEN_256                256
+#define BUFFER_LEN_128                128
+#define BUFFER_LEN_64                 64
+#define BUFFER_LEN_32                 32
+
+
 
 // RDKB uses breakpad for crash handling; RDKV uses the custom signal handler below.
 #ifndef RDKV
@@ -88,19 +94,18 @@ int main(int argc, char *argv[])
 
     /*Log init*/
     log_init();
-
     if (handle_wan_status(argc, argv))
     {
                 return 0;
     }
 
     /*Coverity Fix CID:78992,78513  */
-    char modelName[256]={'\0'};
-    char serialNumber[256]={'\0'};
-    char firmwareVersion[64]={'\0'};
-    char deviceMac[64]={'\0'};
-    char webpaInterface[64]={"erouter0"};
-    char manufacturer[64]={'\0'};
+    char modelName[BUFFER_LEN_256]={'\0'};
+    char serialNumber[BUFFER_LEN_256]={'\0'};
+    char firmwareVersion[BUFFER_LEN_64]={'\0'};
+    char deviceMac[BUFFER_LEN_64]={'\0'};
+    char webpaInterface[BUFFER_LEN_64]={"erouter0"};
+    char manufacturer[BUFFER_LEN_64]={'\0'};
     char parodus_url[MAX_SERVER_URL_SIZE] = {'\0'};
     char seshat_url[MAX_SERVER_URL_SIZE] = {'\0'};
     char build_type[MAX_BUILD_LEN] = {'\0'};
@@ -112,15 +117,15 @@ int main(int argc, char *argv[])
     int wait_time = 0;
     int jwtFlag;
     int webpaPingTime;
-    char final_lastRebootReason[128] = {'\0'};
-    char client_cert_path[128]={'\0'};
-    char ssl_engine[32]="NA";
+    char final_lastRebootReason[BUFFER_LEN_128] = {'\0'};
+    char client_cert_path[BUFFER_LEN_128]={'\0'};
+    char ssl_engine[BUFFER_LEN_32]="NA";
     char ssl_cert_type[8]="NA";
-    char ssl_reference_name[128]="NA";
+    char ssl_reference_name[BUFFER_LEN_128]="NA";
     int decodeStatus = -1;
     ParodusCommandConfig commandConfig;
 
-#if defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
+#if defined (DEVICE_RDKB) && defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
     LogInfo("Proceeding to unregister wan-status event\n");
 
     system("/etc/utopia/registration.d/02_parodus stop");
@@ -128,6 +133,7 @@ int main(int argc, char *argv[])
     LogInfo("startParodus is enabled\n");
 
     init_hal_db();
+
     getModelName(modelName, sizeof(modelName));
     getSerialNumber(serialNumber, sizeof(serialNumber));
     getFirmwareName(firmwareVersion, sizeof(firmwareVersion));

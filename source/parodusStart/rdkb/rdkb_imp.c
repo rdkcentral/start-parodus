@@ -516,7 +516,7 @@ int getDeviceMac(char *deviceMac, size_t macLen)
             if (rc != EOK)
             {
                 ERR_CHK(rc);
-                LogError("Failed to copy device MAC address\n");
+                LogError("Failed to Copy TmpBuffer to deviceMac\n");
             }
             LogInfo("XLE deviceMac is %s\n", deviceMac);
         }
@@ -538,14 +538,14 @@ int getDeviceMac(char *deviceMac, size_t macLen)
         if (rc < EOK)
         {
             ERR_CHK(rc);
-            LogError("Failed to copy device MAC address\n");
+            LogError("Failed to copy deviceMac\n");
             return -1;
         }
         LogInfo("deviceMac is %s\n", deviceMac);
     }
     else
     {
-        LogError("Unable to get MAC address\n");
+        LogError("Unable to get MACAdress\n");
         return -1;
     }
 #else
@@ -558,7 +558,7 @@ int getDeviceMac(char *deviceMac, size_t macLen)
 
     if (fd < 0)
     {
-        LogError("s_sysevent_connect() returned an error\n");
+        LogError("s_sysevent_connect() is returned Error\n");
         return -1;
     }
 
@@ -578,7 +578,7 @@ int getDeviceMac(char *deviceMac, size_t macLen)
         if (rc != EOK)
         {
             ERR_CHK(rc);
-            LogError("Failed to copy device MAC address\n");
+            LogError("Failed to Copy deviceMACValue to deviceMac\n");
             return -1;
         }
         LogInfo("deviceMac is %s\n", deviceMac);
@@ -600,11 +600,12 @@ int getDeviceMac(char *deviceMac, size_t macLen)
             CMMGMT_CM_DHCP_INFO dhcpinfo;
             if (cm_hal_GetDHCPInfo(&dhcpinfo) == 0)
             {
+                LogInfo("MACAddress = %s\n", dhcpinfo.MACAddress);
                 rc = strcpy_s(deviceMac, macLen, dhcpinfo.MACAddress);
                 if (rc != EOK)
                 {
                     ERR_CHK(rc);
-                    LogError("Failed to copy DHCP MAC address\n");
+                    LogError("Failed to Copy dhcpinfo.MACAddress to deviceMac\n");
                 }
             }
 #else
@@ -617,12 +618,13 @@ int getDeviceMac(char *deviceMac, size_t macLen)
                 break;
             }
 
-            LogError("Unable to get MAC address. Retrying...\n");
+            LogError("Unable to get MAC Address. Retrying...\n");
+            LogInfo("New backoffRetryTime value calculated as %d seconds\n", backoffRetryTime);
             sleep(backoffRetryTime);
             exponent++;
             if (backoffRetryTime >= maxRetryTime)
             {
-                LogError("Unable to get MAC address after retries\n");
+                LogError("BackoffRetryTime reached max value and Unable to get MACAdress, reseting Start_Parodus\n");
                 return -1;
             }
         }
@@ -746,7 +748,7 @@ int getWebpaInterface(char *interfaceName, size_t interfaceLen)
 
     if (fd < 0)
     {
-        LogError("s_sysevent_connect() returned an error\n");
+        LogError("s_sysevent_connect() is returned Error\n");
         return -1;
     }
 
@@ -757,7 +759,7 @@ int getWebpaInterface(char *interfaceName, size_t interfaceLen)
         if (rc != EOK)
         {
             ERR_CHK(rc);
-            LogError("Failed to copy WAN interface\n");
+            LogError("Failed to Copy interfaceValue to webpaInterface\n");
             return -1;
         }
         LogInfo("webpaInterface is %s\n", interfaceName);
@@ -882,7 +884,7 @@ static void getSECertSupport(char *seCertSupport, size_t supportLen)
 
     if (seCertSupport[0] == '\0')
     {
-        LogError("UseSEBasedCert is not present in device.properties\n");
+        LogError("UseSEBasedCert is not present in device.properties \n");
     }
     else
     {
@@ -987,7 +989,7 @@ int getPartnerId(char *partnerId, size_t partnerIdLen)
         file = popen("/lib/rdk/getpartnerid.sh GetPartnerID", "r");
         if (file == NULL)
         {
-            LogError("Error in opening file to get partner ID\n");
+            LogError("Error in opening File to get partnerID\n");
             return -1;
         }
 
@@ -1005,6 +1007,8 @@ int getPartnerId(char *partnerId, size_t partnerIdLen)
             *newline = '\0';
         }
     }
+
+    LogInfo("PartnerID fetched is %s\n", partnerId);
 
     if (partnerId[0] == '\0')
     {
@@ -1074,6 +1078,7 @@ char *getWebpaUrl(const char *buildType)
         if (getValueFromCfgJson(WEBPA_CFG_SERVER_URL, &serverUrl) == 0)
         {
             webpaUrl = serverUrl;
+            LogInfo("webpaUrl fetched from webpa_cfg.json is %s\n", webpaUrl);
             if (strchr(webpaUrl, ':') == NULL && strstr(webpaUrl, "comcast") != NULL &&
                 getValueFromCfgJson(WEBPA_CFG_SERVER_PORT, &serverPort) == 0)
             {
@@ -1086,6 +1091,7 @@ char *getWebpaUrl(const char *buildType)
                     {
                         free(webpaUrl);
                         webpaUrl = framedUrl;
+                        LogInfo("Framed webpa url is %s\n", webpaUrl);
                     }
                     else
                     {
@@ -1250,7 +1256,7 @@ void getRebootReason(char *reason, size_t reasonLen)
         if (rc != EOK)
         {
             ERR_CHK(rc);
-            LogError("Failed to copy reboot reason as unknown\n");
+            LogError("Failed to copy final_lastRebootReason\n");
         }
         return;
     }
@@ -1321,64 +1327,6 @@ static void getValuesFromPsmDb(char *names[], char **values,int count)
     } 
 }
 
-#if 0
-static int sync_get_psm_values(char *names[], char *values[], int count)
-{
-    FILE *output;
-    char command[MAX_BUF_SIZE] = {'\0'};
-    char request[MAX_BUF_SIZE] = {'\0'};
-    char buffer[MAX_BUF_SIZE] = {'\0'};
-    char value[MAX_VALUE_SIZE] = {'\0'};
-    int offset = 0;
-    int index = 0;
-    int i;
-    int rc;
-
-    for (i = 0; i < count; i++)
-    {
-        rc = sprintf_s(request + offset, sizeof(request) - offset,
-                       " %dX %s%s", i, PSM_PATH_PREFIX, names[i]);
-        if (rc < EOK)
-        {
-            ERR_CHK(rc);
-            return -1;
-        }
-        offset += rc;
-    }
-
-    rc = sprintf_s(command, sizeof(command), "psmcli get -e%s", request);
-    if (rc < EOK)
-    {
-        ERR_CHK(rc);
-        return -1;
-    }
-
-    output = popen(command, "r");
-    if (output == NULL)
-    {
-        LogError("Failed to execute PSM get command\n");
-        return -1;
-    }
-
-    for (i = 0; i < count; i++)
-    {
-        if (fgets(buffer, sizeof(buffer), output) == NULL)
-        {
-            LogError("Failed to read PSM value\n");
-            pclose(output);
-            return -1;
-        }
-
-        if (sscanf(buffer, "%dX=\"%63[^\"]", &index, value) == 2 && index == i)
-        {
-            values[i] = strdup(value);
-        }
-    }
-
-    pclose(output);
-    return 0;
-}
-#endif
 static int getPartnerUrl(const char *partnerId, const char *paramName, char **value)
 {
     FILE *file;
@@ -1553,6 +1501,7 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
 
     paramCount = sizeof(paramNames)/sizeof(paramNames[0]);
     getWebpaValuesFromPsmDb(paramNames, psmValues, paramCount);
+    LogInfo("DB details are %s = %s %s = %s %s = %s\n",paramNames[0],psmValues[0],paramNames[1],psmValues[1],paramNames[2],psmValues[2]);
     for(i=0; i<paramCount; i++)
     {
         if(psmValues[i])
@@ -1591,12 +1540,24 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
                 *webpaUrl = NULL;
             }
             *webpaUrl = strdup(serverUrl);
+            if(*webpaUrl != NULL)
+            {
+                LogInfo("webpaUrl is %s\n", *webpaUrl);
+            }
+            else
+            {
+                LogError("strdup failed for WEBPA_SERVER_URL\n");
+            }
+        }
+        else
+        {
+            LogError("WEBPA_SERVER_URL is NULL or empty, cannot set webpaUrl\n");
         }
     }
 
     if (*webpaUrl == NULL || (*webpaUrl)[0] == '\0')
     {
-        LogError("Unable to determine WebPA URL\n");
+        LogError("Unable to determine webpa URL, cannot start parodus\n");
         if (serverUrl != NULL) free(serverUrl);
         if (*webpaUrl != NULL) free(*webpaUrl);
         if ( *tokenServerUrl != NULL) free(*tokenServerUrl);
@@ -1607,11 +1568,9 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
         return -1;
     }
 
-    LogInfo("WEBPA URL values fetched: webpa=%s server=%s token=%s dns=%s\n",
-            *webpaUrl != NULL ? *webpaUrl : "(null)",
-            serverUrl != NULL ? serverUrl : "(null)",
-            *tokenServerUrl != NULL ? *tokenServerUrl : "(null)",
-            *dnsTextUrl != NULL ? *dnsTextUrl : "(null)");
+    LogInfo("WEBPA_SERVER_URL = %s\n", (serverUrl != NULL) ? serverUrl : "(null)");
+    LogInfo("TOKEN_SERVER_URL = %s\n", (*tokenServerUrl != NULL) ? *tokenServerUrl : "(null)");
+    LogInfo("DNS_TEXT_URL = %s\n", (*dnsTextUrl != NULL) ? *dnsTextUrl : "(null)");
     free(serverUrl);
     return 0;
 }
@@ -1673,123 +1632,6 @@ static int setValuesToPsmDb(char *names[], char **values,int count)
     return 0;
 }
 
-#if 0
-static int syncXpcParamsOnUpgrade(char *firmwareVersion)
-{
-    char lastRebootReason[128] = {'\0'};
-    
-    char *paramList[] = {"X_COMCAST-COM_CMC", "X_COMCAST-COM_CID", "X_COMCAST-COM_SyncProtocolVersion"};
-    char *psmValues[3] = {NULL};
-    char *sysCfgValues[3] = {NULL};
-    char *configFirmware = NULL;
-    FILE *configFile = NULL;
-    cJSON *configJson = NULL;
-    cJSON *firmwareItem = NULL;
-    char *configData = NULL;
-    char *updatedConfig = NULL;
-    long configLength;
-    int parodusEnable = 0;
-    int status = -1;
-    int i;
-    int ind = -1;
-    errno_t rc;
-
-    syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
-        
-    configFile = fopen(WEBPA_CFG_FILE, "r");
-    if (configFile != NULL)
-    {
-        fseek(configFile, 0, SEEK_END);
-        configLength = ftell(configFile);
-        fseek(configFile, 0, SEEK_SET);
-        if (configLength > 0)
-        {
-            configData = malloc((size_t)configLength + 1);
-            if (configData != NULL && fread(configData, 1, (size_t)configLength, configFile) == (size_t)configLength)
-            {
-                configData[configLength] = '\0';
-                configJson = cJSON_Parse(configData);
-            }
-        }
-        fclose(configFile);
-    }
-
-    if (configJson != NULL)
-    {
-        firmwareItem = cJSON_GetObjectItem(configJson, WEBPA_CFG_FIRMWARE_VER);
-        if (firmwareItem != NULL && cJSON_IsString(firmwareItem) && firmwareItem->valuestring != NULL)
-        {
-            configFirmware = firmwareItem->valuestring;
-        }
-    }
-
-    rc = strcmp_s("Software_upgrade", strlen("Software_upgrade"), lastRebootReason, &ind);
-    ERR_CHK(rc);
-    if (rc == EOK && ind == 0)
-    {
-        parodusEnable = 1;
-    }
-    else if (configFirmware != NULL)
-    {
-        rc = strcmp_s(firmwareVersion, strlen(firmwareVersion), configFirmware, &ind);
-        ERR_CHK(rc);
-        if (rc == EOK && ind != 0)
-        {
-            parodusEnable = 1;
-        }
-    }
-
-    if (sync_get_psm_values(paramList, psmValues, 3) != 0)
-    {
-        goto cleanup;
-    }
-
-    if (parodusEnable && psmValues[0] != NULL && psmValues[1] != NULL && psmValues[2] != NULL &&
-        atoi(psmValues[0]) == 0 && atoi(psmValues[1]) == 0 && atoi(psmValues[2]) == 0)
-    {
-        for (i = 0; i < 3; i++)
-        {
-            sysCfgValues[i] = malloc(MAX_VALUE_SIZE);
-            if (sysCfgValues[i] == NULL || syscfg_get(NULL, paramList[i], sysCfgValues[i], MAX_VALUE_SIZE) != 0)
-            {
-                LogError("Failed to get Syscfg value for %s\n", paramList[i]);
-                goto cleanup;
-            }
-        }
-
-        status = sync_set_psm_values(paramList, sysCfgValues, 3);
-        if (status == 0)
-        {
-            LogInfo("Successfully set values to PSM DB\n");
-        }
-    }
-
-#ifdef UPDATE_CONFIG_FILE
-    if (configJson != NULL)
-    {
-        cJSON_ReplaceItemInObject(configJson, WEBPA_CFG_FIRMWARE_VER, cJSON_CreateString(firmwareVersion));
-        updatedConfig = cJSON_Print(configJson);
-        if (updatedConfig != NULL)
-        {
-            configFile = fopen(WEBPA_CFG_FILE, "w");
-            if (configFile != NULL)
-            {
-                fwrite(updatedConfig, strlen(updatedConfig), 1, configFile);
-                fclose(configFile);
-            }
-        }
-    }
-#endif
-
-cleanup:
-    free(updatedConfig);
-    free(configData);
-    cJSON_Delete(configJson);
-    sync_free_values(psmValues, 3);
-    sync_free_values(sysCfgValues, 3);
-    return status;
-}
-#endif
 static int syncXpcParamsOnUpgrade(char *lastRebootReason, char *firmwareVersion)
 {
 	int paramCount = 0, status = 0, i = 0;
