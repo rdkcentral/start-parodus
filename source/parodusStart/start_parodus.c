@@ -29,11 +29,11 @@
 #include <autoconf.h>
 #endif
 #include "start_parodus.h"
-#ifdef RDKV
-#include "rdkv/rdkv_imp.h"
-#include <signal.h>
+#ifdef DEVICE_GATEWAY
+#include "rdkv/rdkb_imp.h"
 #else
-#include "rdkb/rdkb_imp.h"
+#include <signal.h>
+#include "rdkb/rdkv_imp.h"
 #endif
 
 #define MAX_SERVER_URL_SIZE           64
@@ -47,7 +47,7 @@
 
 
 // RDKB uses breakpad for crash handling; RDKV uses the custom signal handler below.
-#ifndef RDKV
+#ifdef DEVICE_GATEWAY
 #ifdef INCLUDE_BREAKPAD
 #include "breakpad_wrapper.h"
 #endif
@@ -62,7 +62,7 @@ static void processExit(int sig)
     #define STATIC                    static
 
 #else
-        #define STATIC
+    #define STATIC
 
     extern FILE* fopen_mock(const char* filename, const char* mode);
     #define fopen                     fopen_mock    // Mock fopen for testing
@@ -82,7 +82,7 @@ STATIC char *DNS_TEXT_URL = NULL;
 #ifndef UNIT_TEST_DOCKER_SUPPORT
 int main(int argc, char *argv[])
 {
-#ifndef RDKV
+#ifdef DEVICE_GATEWAY
 #ifdef INCLUDE_BREAKPAD
     breakpad_ExceptionHandler();
 #endif
@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
     int decodeStatus = -1;
     ParodusCommandConfig commandConfig;
 
-#if defined (DEVICE_RDKB) && defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
+#if defined (DEVICE_GATEWAY) && defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
     LogInfo("Proceeding to unregister wan-status event\n");
 
     system("/etc/utopia/registration.d/02_parodus stop");
@@ -242,9 +242,9 @@ int main(int argc, char *argv[])
         free(webpaUrl);
         webpaUrl = NULL;
     }
-    /* Need only for RDKB platforms*/
+#ifdef DEVICE_GATEWAY/* Need only for RDKB platforms*/
     syncPsmDbOnUpgrade(firmwareVersion);
-
+#endif
     if (startParodusProcess(command) != 0)
     {
         LogError("Failed to start parodus process\n");
