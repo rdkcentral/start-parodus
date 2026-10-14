@@ -69,6 +69,9 @@
 #define SE_DEVICE_CERT      "/nvram/certs/devicecert_2.pk12"
 #define DEVICE_CERT         "/nvram/certs/devicecert_1.pk12"
 #define STATIC_CERT         "/etc/ssl/certs/staticXpkiCrt.pk12"
+#define SE_DEVICE_CERT_REF  "/tmp/.cfgDynamicSExpki"
+#define DEVICE_CERT_REF     "/tmp/.cfgDynamicxpki"
+#define STATIC_CERT_REF     "/tmp/.cfgStaticxpki"
 #define PARODUS_UPSTREAM    "tcp://127.0.0.1:6666"
 #define SSL_CERT_BUNDLE     "/etc/ssl/certs/ca-certificates.crt"
 #define JWT_KEY             "/etc/ssl/certs/webpa-rs256.pem"
@@ -96,7 +99,6 @@ int s_sysevent_connect(token_t *out_se_token);
 FILE *g_fArmConsoleLog = NULL;
 static char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
 static void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
-//static int get_psm_values(char *names[], char *values[], int count);
 static void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
 static void getValuesFromSysCfgDb(char *names[], char **values,int count);
 
@@ -648,15 +650,15 @@ int getSslReferenceName(int decodeStatus, char *referenceName, size_t referenceL
     memset(referenceName, 0, referenceLen);
     if (decodeStatus == 1)
     {
-        referencePath = "/tmp/.cfgDynamicSExpki";
+        referencePath = SE_DEVICE_CERT_REF;
     }
     else if (decodeStatus == 2)
     {
-        referencePath = "/tmp/.cfgDynamicxpki";
+        referencePath = DEVICE_CERT_RE;
     }
     else if (decodeStatus == 3)
     {
-        referencePath = "/tmp/.cfgStaticxpki";
+        referencePath = STATIC_CERT_REF;
     }
     else
     {
@@ -686,7 +688,7 @@ int getSslEngine(const char *clientCertPath, char *sslEngine, size_t engineLen)
         return -1;
     }
 
-    if (strcmp(clientCertPath, "/nvram/certs/devicecert_2.pk12") == 0)
+    if (strcmp(clientCertPath, SE_DEVICE_CERT) == 0)
     {
         rc = strcpy_s(sslEngine, engineLen, "e4sss");
         if (rc != EOK)
@@ -940,15 +942,15 @@ int getClientCertPath(int decodeStatus, char *clientCertPath, size_t pathLen)
     memset(clientCertPath, 0, pathLen);
     if (decodeStatus == 1)
     {
-        certificatePath = "/nvram/certs/devicecert_2.pk12";
+        certificatePath = SE_DEVICE_CERT;
     }
     else if (decodeStatus == 2)
     {
-        certificatePath = "/nvram/certs/devicecert_1.pk12";
+        certificatePath = DEVICE_CERT;
     }
     else if (decodeStatus == 3)
     {
-        certificatePath = "/etc/ssl/certs/staticXpkiCrt.pk12";
+        certificatePath = STATIC_CERT;
     }
     else
     {
