@@ -30,7 +30,7 @@
 #endif
 #include "start_parodus.h"
 #ifdef DEVICE_GATEWAY
-#include "rdkv/rdkb_imp.h"
+#include "rdkb/rdkb_imp.h"
 #else
 #include <signal.h>
 #include "rdkb/rdkv_imp.h"
@@ -94,11 +94,12 @@ int main(int argc, char *argv[])
 
     /*Log init*/
     log_init();
+#ifdef DEVICE_GATEWAY
     if (handle_wan_status(argc, argv))
     {
-                return 0;
+        return 0;
     }
-
+#endif
     /*Coverity Fix CID:78992,78513  */
     char modelName[BUFFER_LEN_256]={'\0'};
     char serialNumber[BUFFER_LEN_256]={'\0'};
@@ -132,8 +133,9 @@ int main(int argc, char *argv[])
 #endif
     LogInfo("startParodus is enabled\n");
 
+#ifdef DEVICE_GATEWAY
     init_hal_db();
-
+#endif
     getModelName(modelName, sizeof(modelName));
     getSerialNumber(serialNumber, sizeof(serialNumber));
     getFirmwareName(firmwareVersion, sizeof(firmwareVersion));

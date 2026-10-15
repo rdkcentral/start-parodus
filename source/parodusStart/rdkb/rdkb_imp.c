@@ -654,7 +654,7 @@ int getSslReferenceName(int decodeStatus, char *referenceName, size_t referenceL
     }
     else if (decodeStatus == 2)
     {
-        referencePath = DEVICE_CERT_RE;
+        referencePath = DEVICE_CERT_REF;
     }
     else if (decodeStatus == 3)
     {

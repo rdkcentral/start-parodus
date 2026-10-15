@@ -50,9 +50,11 @@ typedef struct
 
 FILE *log_init(void);
 void log_close(void);
+#ifdef DEVICE_GATEWAY
 int handle_wan_status(int argc, char *argv[]);
 void init_hal_db(void);
-
+void syncPsmDbOnUpgrade(char *firmwareVersion);
+#endif
 int publishParodusCommand(const char *command);
 int startParodusProcess(const char *command);
 int buildParodusCommand(char *command, size_t commandLen,
@@ -77,6 +79,5 @@ void getSerialNumber(char *serialNumber, size_t len);
 void getFirmwareName(char *fwName, size_t fwNameLen);
 void getManufacturer(char *manufacturer, size_t len);
 void getRebootReason(char *reason, size_t reasonLen);
-void syncPsmDbOnUpgrade(char *firmwareVersion);
 
 #endif /* START_PARODUS_H */
