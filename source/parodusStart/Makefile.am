@@ -18,14 +18,25 @@
 ##########################################################################
 bin_PROGRAMS = parodusStart
 
-AM_CFLAGS = -I$(top_srcdir)/source 
+AM_CFLAGS = -I$(top_srcdir)/source
+AUTOMAKE_OPTIONS = subdir-objects
+
 hardware_platform = i686-linux-gnu
 AM_LDFLAGS =  -lpthread -lz -lccsp_common
 
 if CCSP_ARCH_MIPS
 AM_LDFLAGS += -llmapi
 endif
-parodusStart_SOURCES = start_parodus.c
+parodusStart_SOURCES = start_parodus.c start_parodus.h
+if DEVICE_GATEWAY
+parodusStart_SOURCES += rdkb/rdkb_imp.c rdkb/rdkb_imp.h
+AM_CFLAGS += -DDEVICE_GATEWAY
+endif
+
+if DEVICE_VIDEO
+parodusStart_SOURCES += rdkv/impl.c rdkb/rdkv_imp.h
+AM_CFLAGS += -DDEVICE_VIDEO
+endif
 
 if CCSP_ARCH_ARM
 parodusStart_CPPFLAGS = -D_ANSC_LINUX -D_ANSC_USER 
