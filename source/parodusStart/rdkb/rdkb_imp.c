@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -110,12 +111,18 @@ void rdkb_log(int level, const char *msg, ...)
     char buf[MAX_BUF_SIZE];
     char curtime[128];
     time_t rawtime;
-    struct tm *timeinfo;
+    struct tm timeinfo;
 
     time(&rawtime);
-    timeinfo = localtime(&rawtime);
-    strftime(curtime, sizeof(curtime), "%y%m%d-%T", timeinfo);
 
+    if (localtime_r(&rawtime, &timeinfo) != NULL)
+    {
+        strftime(curtime, sizeof(curtime), "%y%m%d-%T", &timeinfo);
+    }
+    else
+    {
+        snprintf(curtime, sizeof(curtime), "000000-00:00:00");
+    }
     va_start(arg_ptr, msg);
     nbytes = vsnprintf(buf, sizeof(buf), msg, arg_ptr);
     va_end(arg_ptr);
@@ -269,6 +276,7 @@ int publishParodusCommand(const char *command)
     FILE *file;
     int writeStatus;
     int closeStatus;
+    int fd;
 
     if (command == NULL)
     {
@@ -277,9 +285,16 @@ int publishParodusCommand(const char *command)
     }
 
     LogInfo("Opening parodusCmd file for writing the content\n");
-    file = fopen("/tmp/parodusCmd.cmd", "w");
+    fd = open("/tmp/parodusCmd.cmd", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (fd < 0)
+    {
+        LogError("Cannot open %s in write mode\n", "/tmp/parodusCmd.cmd");
+        return -1;
+    }
+    file = fdopen(fd, "w");
     if (file == NULL)
     {
+        close(fd);
         LogError("Cannot open %s in write mode\n", "/tmp/parodusCmd.cmd");
         return -1;
     }
@@ -822,6 +837,16 @@ static int getValueFromCfgJson(const char *key, char **value)
             *value = strdup(item->valuestring);
             status = *value == NULL ? -1 : 0;
         }
+        else if (item != NULL && cJSON_IsNumber(item))
+        {
+            char numberValue[MAX_VALUE_SIZE];
+            int written = snprintf(numberValue, sizeof(numberValue), "%d", item->valueint);
+            if (written >= 0 && (size_t)written < sizeof(numberValue))
+            {
+                *value = strdup(numberValue);
+                status = *value == NULL ? -1 : 0;
+            }
+        }
         cJSON_Delete(json);
     }
 
@@ -1081,9 +1106,15 @@ char *getWebpaUrl(const char *buildType)
         {
             webpaUrl = serverUrl;
             LogInfo("webpaUrl fetched from webpa_cfg.json is %s\n", webpaUrl);
-            if (strchr(webpaUrl, ':') == NULL && strstr(webpaUrl, "comcast") != NULL &&
-                getValueFromCfgJson(WEBPA_CFG_SERVER_PORT, &serverPort) == 0)
+            if (strchr(webpaUrl, ':') == NULL && strstr(webpaUrl, "comcast") != NULL)
             {
+                if (getValueFromCfgJson(WEBPA_CFG_SERVER_PORT, &serverPort) != 0 ||
+                        serverPort == NULL || serverPort[0] == '\0')
+                {
+                    free(serverPort);
+                    free(webpaUrl);
+                    return NULL;
+                }
                 char *framedUrl = malloc(MAX_SERVER_URL_SIZE);
                 if (framedUrl != NULL)
                 {
