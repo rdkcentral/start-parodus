@@ -35,6 +35,7 @@ extern "C"
 #include "cJSON.h"
 #include "start_parodus.h"
 void waitForPSMHealth(const char *compName);
+char *getWebpaUrl(const char *buildType);
 int numLoops = 1;
 }
 
@@ -88,6 +89,13 @@ static int sprintf_s_success(char* dest, size_t destSize, size_t n, const char* 
 {
     strncpy(dest, formatted, destSize);
     return strlen(dest);
+}
+
+static errno_t strcmp_s_real(const char* dest, size_t dmax, const char* src, int* result,
+                             size_t destbos, size_t srcbos)
+{
+    *result = strcmp(dest, src);
+    return 0;
 }
 
 // buildParodusCommand
@@ -797,5 +805,771 @@ TEST_F(StartParodusTestFixture, waitForPSMHealth_Never_Green)
         .WillRepeatedly(DoAll(SetArgPointee<3>(1), Return(0)));
 
     waitForPSMHealth("Test_Component");
+}
+
+// handle_wan_status
+TEST_F(StartParodusTestFixture, handle_wan_status_NoArgs)
+{
+    char *argv[] = {(char *)"parodusStart", nullptr};
+
+    EXPECT_EQ(0, handle_wan_status(1, argv));
+}
+
+TEST_F(StartParodusTestFixture, handle_wan_status_OtherArg)
+{
+    char *argv[] = {(char *)"parodusStart", (char *)"other", nullptr};
+
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcmp_s_real));
+
+    EXPECT_EQ(0, handle_wan_status(2, argv));
+}
+
+TEST_F(StartParodusTestFixture, handle_wan_status_NotStarted)
+{
+    char *argv[] = {(char *)"parodusStart", (char *)"wan-status", (char *)"stopped", nullptr};
+
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .Times(2)
+        .WillRepeatedly(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_fileIOMock, fclose(_))
+        .WillRepeatedly(Return(0));
+
+    EXPECT_EQ(1, handle_wan_status(3, argv));
+}
+
+TEST_F(StartParodusTestFixture, handle_wan_status_Started_popen_Fail)
+{
+    char *argv[] = {(char *)"parodusStart", (char *)"wan-status", (char *)"started", nullptr};
+
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .Times(2)
+        .WillRepeatedly(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_fileIOMock, popen(_, _))
+        .Times(1)
+        .WillOnce(Return(nullptr));
+
+    EXPECT_EQ(1, handle_wan_status(3, argv));
+}
+
+TEST_F(StartParodusTestFixture, handle_wan_status_Started_ParodusRunning)
+{
+    char *argv[] = {(char *)"parodusStart", (char *)"wan-status", (char *)"started", nullptr};
+    FILE *output = reinterpret_cast<FILE *>(1);
+
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .Times(2)
+        .WillRepeatedly(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_fileIOMock, popen(_, _))
+        .Times(1)
+        .WillOnce(Return(output));
+    EXPECT_CALL(*g_fileIOMock, fgets(_, _, output))
+        .Times(1)
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "1234\n", size);
+            return buf;
+        }));
+    EXPECT_CALL(*g_fileIOMock, pclose(output))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_EQ(1, handle_wan_status(3, argv));
+}
+
+TEST_F(StartParodusTestFixture, handle_wan_status_Started_ParodusNotRunning)
+{
+    char *argv[] = {(char *)"parodusStart", (char *)"wan-status", (char *)"started", nullptr};
+    FILE *output = reinterpret_cast<FILE *>(1);
+
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .Times(2)
+        .WillRepeatedly(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_fileIOMock, popen(_, _))
+        .Times(1)
+        .WillOnce(Return(output));
+    EXPECT_CALL(*g_fileIOMock, fgets(_, _, output))
+        .Times(1)
+        .WillOnce(Return(nullptr));
+    EXPECT_CALL(*g_fileIOMock, pclose(output))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_EQ(0, handle_wan_status(3, argv));
+}
+
+// init_hal_db
+TEST_F(StartParodusTestFixture, init_hal_db_Success)
+{
+    EXPECT_CALL(*g_platformHALMock, platform_hal_PandMDBInit())
+        .Times(1)
+        .WillOnce(Return(0));
+    EXPECT_CALL(*g_cmHALMock, cm_hal_InitDB())
+        .Times(1)
+        .WillOnce(Return(0));
+
+    init_hal_db();
+}
+
+TEST_F(StartParodusTestFixture, init_hal_db_Failure)
+{
+    EXPECT_CALL(*g_platformHALMock, platform_hal_PandMDBInit())
+        .Times(1)
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_cmHALMock, cm_hal_InitDB())
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    init_hal_db();
+}
+
+// startParodusProcess
+TEST_F(StartParodusTestFixture, startParodusProcess_Default)
+{
+    EXPECT_EQ(0, startParodusProcess("TestCommand"));
+}
+
+// getDeviceMac
+TEST_F(StartParodusTestFixture, getDeviceMac_SyseventConnect_Fail)
+{
+    char device_mac[32] = {'\0'};
+
+    EXPECT_CALL(*g_utopiaMock, s_sysevent_connect(_))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    EXPECT_EQ(-1, getDeviceMac(device_mac, sizeof(device_mac)));
+}
+
+TEST_F(StartParodusTestFixture, getDeviceMac_EthWanEnabled)
+{
+    char device_mac[32] = {'\0'};
+    const char *eth_enabled = "true";
+    const char *eth_mac = "aa:bb:cc:dd:ee:ff";
+
+    EXPECT_CALL(*g_utopiaMock, s_sysevent_connect(_))
+        .Times(1)
+        .WillOnce(Return(1));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("eth_wan_enabled"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(eth_enabled, eth_enabled + strlen(eth_enabled) + 1),
+                        Return(0)));
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_syseventMock, sysevent_get(_, _, StrEq("eth_wan_mac"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<3>(eth_mac, eth_mac + strlen(eth_mac) + 1),
+                        Return(0)));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+
+    EXPECT_EQ(0, getDeviceMac(device_mac, sizeof(device_mac)));
+    EXPECT_STREQ(device_mac, eth_mac);
+}
+
+TEST_F(StartParodusTestFixture, getDeviceMac_FromDhcpInfo)
+{
+    char device_mac[32] = {'\0'};
+
+    EXPECT_CALL(*g_utopiaMock, s_sysevent_connect(_))
+        .Times(1)
+        .WillOnce(Return(1));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("eth_wan_enabled"), _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_cmHALMock, cm_hal_GetDHCPInfo(_))
+        .Times(1)
+        .WillOnce(Invoke([](PCMMGMT_CM_DHCP_INFO pInfo) {
+            strcpy(pInfo->MACAddress, "00:11:22:33:44:55");
+            return 0;
+        }));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+
+    EXPECT_EQ(0, getDeviceMac(device_mac, sizeof(device_mac)));
+    EXPECT_STREQ(device_mac, "00:11:22:33:44:55");
+}
+
+// strcpy_s failures
+TEST_F(StartParodusTestFixture, getSslReferenceName_strcpy_Fail)
+{
+    char ssl_reference_name[128] = {'\0'};
+
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    EXPECT_EQ(-1, getSslReferenceName(2, ssl_reference_name, sizeof(ssl_reference_name)));
+}
+
+TEST_F(StartParodusTestFixture, getSslEngine_strcpy_Fail)
+{
+    char ssl_engine[32] = "NA";
+
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    EXPECT_EQ(-1, getSslEngine("/nvram/certs/devicecert_2.pk12", ssl_engine, sizeof(ssl_engine)));
+}
+
+TEST_F(StartParodusTestFixture, getWebpaInterface_strcpy_Fail)
+{
+    char webpa_interface[64] = {'\0'};
+
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    EXPECT_EQ(-1, getWebpaInterface(webpa_interface, sizeof(webpa_interface)));
+}
+
+TEST_F(StartParodusTestFixture, getPartnerId_strcpy_Fail)
+{
+    char partner_id[MAX_PARTNERID_LEN] = {'\0'};
+    const char *configured_partner_id = "comcast";
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(nullptr, StrEq("PartnerID"), _, _))
+        .WillOnce(DoAll(SetArrayArgument<2>(configured_partner_id,
+                                            configured_partner_id + strlen(configured_partner_id) + 1),
+                        Return(0)));
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .WillOnce(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .WillOnce(Return(-1));
+
+    EXPECT_EQ(-1, getPartnerId(partner_id, sizeof(partner_id)));
+}
+
+TEST_F(StartParodusTestFixture, getPartnerId_sprintf_Fail)
+{
+    char partner_id[MAX_PARTNERID_LEN] = {'\0'};
+    const char *configured_partner_id = "comcast";
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(nullptr, StrEq("PartnerID"), _, _))
+        .WillOnce(DoAll(SetArrayArgument<2>(configured_partner_id,
+                                            configured_partner_id + strlen(configured_partner_id) + 1),
+                        Return(0)));
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .WillOnce(Invoke(strcmp_s_real));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .WillOnce(Invoke(strcpy_s_success));
+    EXPECT_CALL(*g_safecLibMock, _sprintf_s_chk(_, _, _, _))
+        .WillOnce(Return(-1));
+
+    EXPECT_EQ(-1, getPartnerId(partner_id, sizeof(partner_id)));
+}
+
+// getModelName / getSerialNumber / getFirmwareName
+TEST_F(StartParodusTestFixture, getModelName_Success)
+{
+    char model_name[64] = {'\0'};
+
+    EXPECT_CALL(*g_platformHALMock, platform_hal_GetModelName(_))
+        .Times(1)
+        .WillOnce(Invoke([](CHAR *value) {
+            strcpy(value, "TestModel");
+            return 0;
+        }));
+
+    getModelName(model_name, sizeof(model_name));
+    EXPECT_STREQ(model_name, "TestModel");
+}
+
+TEST_F(StartParodusTestFixture, getModelName_Fail)
+{
+    char model_name[64] = "stale";
+
+    EXPECT_CALL(*g_platformHALMock, platform_hal_GetModelName(_))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    getModelName(model_name, sizeof(model_name));
+    EXPECT_STREQ(model_name, "");
+    getModelName(nullptr, sizeof(model_name));
+}
+
+TEST_F(StartParodusTestFixture, getSerialNumber_Success)
+{
+    char serial_number[64] = {'\0'};
+
+    EXPECT_CALL(*g_platformHALMock, platform_hal_GetSerialNumber(_))
+        .Times(1)
+        .WillOnce(Invoke([](CHAR *value) {
+            strcpy(value, "TestSerial");
+            return 0;
+        }));
+
+    getSerialNumber(serial_number, sizeof(serial_number));
+    EXPECT_STREQ(serial_number, "TestSerial");
+}
+
+TEST_F(StartParodusTestFixture, getSerialNumber_Fail)
+{
+    char serial_number[64] = "stale";
+
+    EXPECT_CALL(*g_platformHALMock, platform_hal_GetSerialNumber(_))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    getSerialNumber(serial_number, sizeof(serial_number));
+    EXPECT_STREQ(serial_number, "");
+    getSerialNumber(nullptr, sizeof(serial_number));
+}
+
+TEST_F(StartParodusTestFixture, getFirmwareName_Success)
+{
+    char firmware_name[64] = {'\0'};
+
+    EXPECT_CALL(*g_platformHALMock, platform_hal_GetFirmwareName(_, _))
+        .Times(1)
+        .WillOnce(Invoke([](CHAR *value, ULONG size) {
+            strncpy(value, "TestFirmware", size);
+            return 0;
+        }));
+
+    getFirmwareName(firmware_name, sizeof(firmware_name));
+    EXPECT_STREQ(firmware_name, "TestFirmware");
+}
+
+TEST_F(StartParodusTestFixture, getFirmwareName_Fail)
+{
+    char firmware_name[64] = "stale";
+
+    EXPECT_CALL(*g_platformHALMock, platform_hal_GetFirmwareName(_, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    getFirmwareName(firmware_name, sizeof(firmware_name));
+    EXPECT_STREQ(firmware_name, "");
+    getFirmwareName(nullptr, sizeof(firmware_name));
+}
+
+// getManufacturer
+TEST_F(StartParodusTestFixture, getManufacturer_Success)
+{
+    char manufacturer[64] = {'\0'};
+
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+
+    getManufacturer(manufacturer, sizeof(manufacturer));
+    EXPECT_STRNE(manufacturer, "");
+}
+
+TEST_F(StartParodusTestFixture, getManufacturer_strcpy_Fail)
+{
+    char manufacturer[64] = {'\0'};
+
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+
+    getManufacturer(manufacturer, sizeof(manufacturer));
+    EXPECT_STREQ(manufacturer, "");
+    getManufacturer(nullptr, sizeof(manufacturer));
+}
+
+// getRebootReason
+TEST_F(StartParodusTestFixture, getRebootReason_syscfg_init_Fail)
+{
+    char reason[128] = {'\0'};
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_init())
+        .Times(1)
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+
+    getRebootReason(reason, sizeof(reason));
+    EXPECT_STREQ(reason, "unknown");
+}
+
+TEST_F(StartParodusTestFixture, getRebootReason_CounterZero_FileMissing)
+{
+    char reason[128] = {'\0'};
+    const char *counter = "0";
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_init())
+        .Times(1)
+        .WillOnce(Return(0));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootCounter"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(counter, counter + strlen(counter) + 1), Return(0)));
+    EXPECT_CALL(*g_fileIOMock, access(_, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+
+    getRebootReason(reason, sizeof(reason));
+    EXPECT_STREQ(reason, "unknown");
+}
+
+TEST_F(StartParodusTestFixture, getRebootReason_StripsSpacesAndParentheses)
+{
+    char reason[128] = {'\0'};
+    const char *counter = "1";
+    const char *last_reboot_reason = "Software upgrade (manual)";
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_init())
+        .Times(1)
+        .WillOnce(Return(0));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootCounter"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(counter, counter + strlen(counter) + 1), Return(0)));
+    EXPECT_CALL(*g_fileIOMock, access(_, _))
+        .Times(1)
+        .WillOnce(Return(0));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootReason"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(last_reboot_reason,
+                                            last_reboot_reason + strlen(last_reboot_reason) + 1),
+                        Return(0)));
+
+    getRebootReason(reason, sizeof(reason));
+    EXPECT_STREQ(reason, "Softwareupgrademanual");
+    getRebootReason(nullptr, sizeof(reason));
+}
+
+// getBootTime
+TEST_F(StartParodusTestFixture, getBootTime_Success)
+{
+    unsigned int boot_time = 0;
+    int wait_time = 0;
+
+    getBootTime(&boot_time, &wait_time);
+    EXPECT_GT(boot_time, 0u);
+    EXPECT_EQ(wait_time, 0);
+
+    getBootTime(nullptr, &wait_time);
+    getBootTime(&boot_time, nullptr);
+}
+
+// getWebpaUrl / getAcquireJwt (webpa_cfg.json)
+static void expectWebpaCfgJson(FILE *mockFile, const char *json_content, cJSON *root, cJSON *item)
+{
+    size_t json_size = strlen(json_content);
+
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/nvram/webpa_cfg.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, _))
+        .Times(2)
+        .WillRepeatedly(Return(0));
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(json_size));
+    EXPECT_CALL(*g_fileIOMock, fread(_, 1, json_size, mockFile))
+        .WillOnce(Invoke([json_content, json_size](void *ptr, size_t size, size_t nmemb, FILE *stream) {
+            memcpy(ptr, json_content, json_size);
+            return json_size;
+        }));
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .WillOnce(Return(0));
+    EXPECT_CALL(*g_cjsonMock, cJSON_Parse(_))
+        .WillOnce(Return(root));
+    EXPECT_CALL(*g_cjsonMock, cJSON_GetObjectItem(_, _))
+        .WillOnce(Return(item));
+    EXPECT_CALL(*g_cjsonMock, cJSON_IsString(_))
+        .WillOnce(Return(1));
+    EXPECT_CALL(*g_cjsonMock, cJSON_Delete(_))
+        .Times(1);
+}
+
+TEST_F(StartParodusTestFixture, getWebpaUrl_NullAndProdBuild)
+{
+    EXPECT_EQ(nullptr, getWebpaUrl(nullptr));
+    EXPECT_EQ(nullptr, getWebpaUrl("prod"));
+}
+
+TEST_F(StartParodusTestFixture, getWebpaUrl_DevBuild_FromConfig)
+{
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+    cJSON mockJsonRoot = {};
+    cJSON mockUrlItem = {};
+    mockUrlItem.type = cJSON_String;
+    mockUrlItem.valuestring = (char *)"https://dev.example.net:8080";
+
+    expectWebpaCfgJson(mockFile, "{\"ServerIP\": \"https://dev.example.net:8080\"}",
+                       &mockJsonRoot, &mockUrlItem);
+
+    char *webpa_url = getWebpaUrl("dev");
+    ASSERT_NE(webpa_url, nullptr);
+    EXPECT_STREQ(webpa_url, "https://dev.example.net:8080");
+    free(webpa_url);
+}
+
+TEST_F(StartParodusTestFixture, getWebpaUrl_DevBuild_ConfigMissing)
+{
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/nvram/webpa_cfg.json"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(nullptr));
+
+    EXPECT_EQ(nullptr, getWebpaUrl("dev"));
+}
+
+TEST_F(StartParodusTestFixture, getAcquireJwt_FromConfig)
+{
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+    cJSON mockJsonRoot = {};
+    cJSON mockJwtItem = {};
+    mockJwtItem.type = cJSON_String;
+    mockJwtItem.valuestring = (char *)"0";
+
+    expectWebpaCfgJson(mockFile, "{\"acquire-jwt\": \"0\"}", &mockJsonRoot, &mockJwtItem);
+
+    EXPECT_EQ(0, getAcquireJwt());
+}
+
+TEST_F(StartParodusTestFixture, getAcquireJwt_EmptyConfig)
+{
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/nvram/webpa_cfg.json"), StrEq("r")))
+        .WillOnce(Return(mockFile));
+    EXPECT_CALL(*g_fileIOMock, fseek(mockFile, 0, _))
+        .Times(2)
+        .WillRepeatedly(Return(0));
+    EXPECT_CALL(*g_fileIOMock, ftell(mockFile))
+        .WillOnce(Return(0));
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .WillOnce(Return(0));
+
+    EXPECT_EQ(1, getAcquireJwt());
+}
+
+// getDeviceConfigFile
+TEST_F(StartParodusTestFixture, getDeviceConfigFile_DevicePropsMissing)
+{
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/device.properties"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(nullptr));
+
+    int ret = getDeviceConfigFile();
+    EXPECT_TRUE(ret == -1 || (ret >= 1 && ret <= 3));
+}
+
+TEST_F(StartParodusTestFixture, getDeviceConfigFile_SECertSupported)
+{
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/device.properties"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(mockFile));
+    EXPECT_CALL(*g_fileIOMock, fscanf(mockFile, _, _))
+        .Times(1)
+        .WillOnce(Invoke([](FILE *file, const char *format, va_list args) {
+            char *str = va_arg(args, char*);
+            snprintf(str, 255, "UseSEBasedCert=true");
+            return 1;
+        }));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    int ret = getDeviceConfigFile();
+    EXPECT_TRUE(ret == -1 || (ret >= 1 && ret <= 3));
+}
+
+// getWebpaConfig (PSM values)
+TEST_F(StartParodusTestFixture, getWebpaConfig_FromPsm)
+{
+    char *webpa_url = nullptr;
+    char *token_server_url = nullptr;
+    char *dns_text_url = nullptr;
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+
+    EXPECT_CALL(*g_safecLibMock, _sprintf_s_chk(_, _, _, _))
+        .WillRepeatedly(Invoke(sprintf_s_success));
+    EXPECT_CALL(*g_fileIOMock, popen(_, _))
+        .Times(1)
+        .WillOnce(Return(mockFile));
+    EXPECT_CALL(*g_fileIOMock, fgets(_, _, mockFile))
+        .Times(3)
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "0X=\"https://webpa.psm.net\"\n", size);
+            return buf;
+        }))
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "1X=\"https://token.psm.net\"\n", size);
+            return buf;
+        }))
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "2X=\"https://dns.psm.net\"\n", size);
+            return buf;
+        }));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(3)
+        .WillRepeatedly(Invoke(strcpy_s_success));
+    EXPECT_CALL(*g_fileIOMock, pclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    int ret = getWebpaConfig("prod", nullptr, &webpa_url, &token_server_url, &dns_text_url);
+    EXPECT_EQ(0, ret);
+    EXPECT_STREQ(webpa_url, "https://webpa.psm.net");
+    EXPECT_STREQ(token_server_url, "https://token.psm.net");
+    EXPECT_STREQ(dns_text_url, "https://dns.psm.net");
+
+    free(webpa_url);
+    free(token_server_url);
+    free(dns_text_url);
+}
+
+// syncPsmDbOnUpgrade
+TEST_F(StartParodusTestFixture, syncPsmDbOnUpgrade_SyncNotRequired)
+{
+    char firmware_version[] = "TestFirmware";
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootReason"), _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_safecLibMock, _sprintf_s_chk(_, _, _, _))
+        .WillRepeatedly(Invoke(sprintf_s_success));
+    EXPECT_CALL(*g_fileIOMock, popen(_, _))
+        .Times(3)
+        .WillRepeatedly(Return(nullptr));
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/nvram/webpa_cfg.json"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(nullptr));
+
+    syncPsmDbOnUpgrade(firmware_version);
+}
+
+TEST_F(StartParodusTestFixture, syncPsmDbOnUpgrade_SyncOnSoftwareUpgrade)
+{
+    char firmware_version[] = "TestFirmware";
+    const char *reboot_reason = "Software_upgrade";
+    const char *cmc = "cmcValue";
+    const char *cid = "cidValue";
+    const char *sync_version = "syncVersion";
+    FILE *psmGetFile = tmpfile();
+    FILE *psmSetFile = tmpfile();
+    ASSERT_NE(psmGetFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+    ASSERT_NE(psmSetFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootReason"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(reboot_reason, reboot_reason + strlen(reboot_reason) + 1),
+                        Return(0)));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_COMCAST-COM_CMC"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(cmc, cmc + strlen(cmc) + 1), Return(0)));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_COMCAST-COM_CID"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(cid, cid + strlen(cid) + 1), Return(0)));
+    EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_COMCAST-COM_SyncProtocolVersion"), _, _))
+        .Times(1)
+        .WillOnce(DoAll(SetArrayArgument<2>(sync_version, sync_version + strlen(sync_version) + 1),
+                        Return(0)));
+
+    EXPECT_CALL(*g_safecLibMock, _sprintf_s_chk(_, _, _, _))
+        .WillRepeatedly(Invoke(sprintf_s_success));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .WillRepeatedly(Invoke(strcpy_s_success));
+    EXPECT_CALL(*g_safecLibMock, _strcmp_s_chk(_, _, _, _, _, _))
+        .WillRepeatedly(Invoke(strcmp_s_real));
+
+    // PSM health check, PSM get, PSM set, final PSM get.
+    EXPECT_CALL(*g_fileIOMock, popen(_, _))
+        .Times(4)
+        .WillOnce(Return(nullptr))
+        .WillOnce(Return(psmGetFile))
+        .WillOnce(Return(psmSetFile))
+        .WillOnce(Return(nullptr));
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/nvram/webpa_cfg.json"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(nullptr));
+    EXPECT_CALL(*g_fileIOMock, fgets(_, _, psmGetFile))
+        .Times(3)
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "0X=\"0\"\n", size);
+            return buf;
+        }))
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "1X=\"0\"\n", size);
+            return buf;
+        }))
+        .WillOnce(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "2X=\"0\"\n", size);
+            return buf;
+        }));
+    EXPECT_CALL(*g_fileIOMock, fgets(_, _, psmSetFile))
+        .Times(3)
+        .WillRepeatedly(Invoke([](char *buf, int size, FILE *file) {
+            strncpy(buf, "100\n", size);
+            return buf;
+        }));
+    EXPECT_CALL(*g_fileIOMock, pclose(_))
+        .Times(2)
+        .WillRepeatedly(Return(0));
+
+    syncPsmDbOnUpgrade(firmware_version);
+}
+
+// log_init / log_close (kept last: a successful log_init redirects stderr)
+TEST_F(StartParodusTestFixture, log_init_strcpy_Fail)
+{
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/device.properties"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(mockFile));
+    EXPECT_CALL(*g_fileIOMock, fscanf(mockFile, _, _))
+        .Times(1)
+        .WillOnce(Invoke([](FILE *file, const char *format, va_list args) {
+            char *str = va_arg(args, char*);
+            snprintf(str, 255, "PARODUS_START_LOG_FILE=/tmp/parodusStart_ut.log");
+            return 1;
+        }));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_fileIOMock, fclose(mockFile))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_EQ(nullptr, log_init());
+}
+
+TEST_F(StartParodusTestFixture, log_init_Success_And_log_close)
+{
+    FILE *mockFile = tmpfile();
+    ASSERT_NE(mockFile, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
+
+    EXPECT_CALL(*g_fopenMock, fopen_mock(StrEq("/etc/device.properties"), StrEq("r")))
+        .Times(1)
+        .WillOnce(Return(mockFile));
+    EXPECT_CALL(*g_fileIOMock, fscanf(mockFile, _, _))
+        .Times(2)
+        .WillOnce(Invoke([](FILE *file, const char *format, va_list args) {
+            char *str = va_arg(args, char*);
+            snprintf(str, 255, "PARODUS_START_LOG_FILE=/tmp/parodusStart_ut.log");
+            return 1;
+        }))
+        .WillOnce(Return(EOF));
+    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke(strcpy_s_success));
+    EXPECT_CALL(*g_fileIOMock, fclose(_))
+        .Times(2)
+        .WillRepeatedly(Return(0));
+
+    EXPECT_NE(nullptr, log_init());
+    log_close();
 }
 
