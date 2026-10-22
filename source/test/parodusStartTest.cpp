@@ -1233,29 +1233,11 @@ TEST_F(StartParodusTestFixture, getManufacturer_strcpy_Fail)
 }
 
 // getRebootReason
-TEST_F(StartParodusTestFixture, getRebootReason_syscfg_init_Fail)
-{
-    char reason[128] = {'\0'};
-
-    EXPECT_CALL(*g_syscfgMock, syscfg_init())
-        .Times(1)
-        .WillOnce(Return(-1));
-    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
-        .Times(1)
-        .WillOnce(Invoke(strcpy_s_success));
-
-    getRebootReason(reason, sizeof(reason));
-    EXPECT_STREQ(reason, "unknown");
-}
-
 TEST_F(StartParodusTestFixture, getRebootReason_CounterZero_FileMissing)
 {
     char reason[128] = {'\0'};
     const char *counter = "0";
 
-    EXPECT_CALL(*g_syscfgMock, syscfg_init())
-        .Times(1)
-        .WillOnce(Return(0));
     EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootCounter"), _, _))
         .Times(1)
         .WillOnce(DoAll(SetArrayArgument<2>(counter, counter + strlen(counter) + 1), Return(0)));
@@ -1276,9 +1258,6 @@ TEST_F(StartParodusTestFixture, getRebootReason_StripsSpacesAndParentheses)
     const char *counter = "1";
     const char *last_reboot_reason = "Software upgrade (manual)";
 
-    EXPECT_CALL(*g_syscfgMock, syscfg_init())
-        .Times(1)
-        .WillOnce(Return(0));
     EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootCounter"), _, _))
         .Times(1)
         .WillOnce(DoAll(SetArrayArgument<2>(counter, counter + strlen(counter) + 1), Return(0)));
@@ -1716,26 +1695,11 @@ TEST_F(StartParodusTestFixture, getDeviceMac_DhcpInfo_RetryThenSuccess)
 }
 
 // getRebootReason strcpy failures
-TEST_F(StartParodusTestFixture, getRebootReason_syscfg_init_Fail_strcpy_Fail)
-{
-    char reason[128] = {'\0'};
-
-    EXPECT_CALL(*g_syscfgMock, syscfg_init())
-        .WillOnce(Return(-1));
-    EXPECT_CALL(*g_safecLibMock, _strcpy_s_chk(_, _, _, _))
-        .WillOnce(Return(-1));
-
-    getRebootReason(reason, sizeof(reason));
-    EXPECT_STREQ(reason, "");
-}
-
 TEST_F(StartParodusTestFixture, getRebootReason_CounterZero_strcpy_Fail)
 {
     char reason[128] = {'\0'};
     const char *counter = "0";
 
-    EXPECT_CALL(*g_syscfgMock, syscfg_init())
-        .WillOnce(Return(0));
     EXPECT_CALL(*g_syscfgMock, syscfg_get(_, StrEq("X_RDKCENTRAL-COM_LastRebootCounter"), _, _))
         .WillOnce(DoAll(SetArrayArgument<2>(counter, counter + strlen(counter) + 1), Return(0)));
     EXPECT_CALL(*g_fileIOMock, access(_, _))
@@ -1751,7 +1715,8 @@ TEST_F(StartParodusTestFixture, getRebootReason_CounterZero_strcpy_Fail)
 TEST_F(StartParodusTestFixture, getPartnerId_EmptyFromScript)
 {
     char partner_id[MAX_PARTNERID_LEN] = {'\0'};
-    FILE *output = reinterpret_cast<FILE *>(1);
+    FILE *output = tmpfile();
+    ASSERT_NE(output, nullptr) << "tmpfile() Failed : Couldn't create temporary file";
 
     EXPECT_CALL(*g_syscfgMock, syscfg_get(nullptr, StrEq("PartnerID"), _, _))
         .WillOnce(Return(0));

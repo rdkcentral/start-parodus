@@ -35,7 +35,8 @@ parodusStart_gtest_bin_CPPFLAGS = -I$(PKG_CONFIG_SYSROOT_DIR)$(includedir)/gtest
                                   -I${top_srcdir}/source/include
 
 # Add preprocessor definitions for unit testing with Docker support.
-parodusStart_gtest_bin_CPPFLAGS += -DUNIT_TEST_DOCKER_SUPPORT -DUPDATE_CONFIG_FILE
+# Fortify would route fgets/fread to __*_chk, bypassing the link-time file I/O mocks.
+parodusStart_gtest_bin_CPPFLAGS += -DUNIT_TEST_DOCKER_SUPPORT -DUPDATE_CONFIG_FILE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
 
 parodusStart_gtest_bin_SOURCES =  gtest_main.cpp \
                                   $(top_srcdir)/source/parodusStart/start_parodus.c \
