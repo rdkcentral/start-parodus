@@ -52,6 +52,15 @@
 #include "safec_lib_common.h"
 #include "rdkb_imp.h"
 
+#ifdef UNIT_TEST_DOCKER_SUPPORT
+extern FILE *fopen_mock(const char *filename, const char *mode);
+extern int numLoops;
+#define fopen fopen_mock
+#define PSM_HEALTH_LOOP() (numLoops-- > 0)
+#else
+#define PSM_HEALTH_LOOP() 1
+#endif
+
 #define DEVICE_PROPS_FILE  "/etc/device.properties"
 #define MAX_BUF_SIZE       1024
 #define MAX_PROCESS_LEN    16
@@ -1828,9 +1837,14 @@ static int syncXpcParamsOnUpgrade(char *lastRebootReason, char *firmwareVersion)
 	return 0;
 }
 
+#ifdef UNIT_TEST_DOCKER_SUPPORT
+void waitForPSMHealth(const char *compName)
+#else
 static void waitForPSMHealth(const char *compName)
+#endif
 {
     int count = 0;
+    int isHealthy = 0;
     char command[128] = {0};
     char parameterName[128] = {0};
     char componentStatus[32] = {0};
@@ -1844,7 +1858,7 @@ static void waitForPSMHealth(const char *compName)
         return;
     }
 
-    while (1)
+    while (PSM_HEALTH_LOOP())
     {
         FILE *output;
 
@@ -1874,6 +1888,7 @@ static void waitForPSMHealth(const char *compName)
         ERR_CHK(rc);
         if (rc == EOK && ind == 0)
         {
+            isHealthy = 1;
             break;
         }
 
@@ -1885,11 +1900,16 @@ static void waitForPSMHealth(const char *compName)
         }
 
         LogError("%s component is not up, waiting\n", parameterName);
+#ifndef UNIT_TEST_DOCKER_SUPPORT
         sleep(10);
+#endif
         count++;
     }
 
-    LogInfo("%s component health is green, continue\n", parameterName);
+    if (isHealthy)
+    {
+        LogInfo("%s component health is green, continue\n", parameterName);
+    }
 }
 
 void syncPsmDbOnUpgrade(char *firmwareVersion)

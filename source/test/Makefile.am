@@ -29,9 +29,10 @@ AUTOMAKE_OPTIONS = subdir-objects
 bin_PROGRAMS = parodusStart_gtest.bin
 
 parodusStart_gtest_bin_CPPFLAGS = -I$(PKG_CONFIG_SYSROOT_DIR)$(includedir)/gtest \
-                                  -I${top_srcdir}/gtest/include \
-                                  -I${top_srcdir}/source \
-                                  -I${top_srcdir}/source/include
+								  -I${top_srcdir}/gtest/include \
+								  -I${top_srcdir}/source \
+								  -I${top_srcdir}/source/parodusStart \
+								  -I${top_srcdir}/source/include
 
 # Add preprocessor definitions for unit testing with Docker support.
 parodusStart_gtest_bin_CPPFLAGS += -DUNIT_TEST_DOCKER_SUPPORT -DUPDATE_CONFIG_FILE
