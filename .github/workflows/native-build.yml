@@ -2,9 +2,9 @@ name: Build start-parodus Component in Native Environment
 
 on:
   push:
-    branches: [ main, 'sprint/**', 'release/**', develop ]
+    branches: [ main, 'sprint/**', 'release/**', develop, 'feature/**' ]
   pull_request:
-    branches: [ main, 'sprint/**', 'release/**', topic/RDK*, develop ]
+    branches: [ main, 'sprint/**', 'release/**', topic/RDK*, develop, 'feature/**' ]
 
 jobs:
   build-start-parodus-component-on-pr:
