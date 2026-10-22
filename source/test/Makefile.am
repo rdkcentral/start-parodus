@@ -29,18 +29,28 @@ AUTOMAKE_OPTIONS = subdir-objects
 bin_PROGRAMS = parodusStart_gtest.bin
 
 parodusStart_gtest_bin_CPPFLAGS = -I$(PKG_CONFIG_SYSROOT_DIR)$(includedir)/gtest \
-								  -I${top_srcdir}/gtest/include \
-								  -I${top_srcdir}/source \
-								  -I${top_srcdir}/source/parodusStart \
-								  -I${top_srcdir}/source/include
+                                  -I${top_srcdir}/gtest/include \
+                                  -I${top_srcdir}/source \
+                                  -I${top_srcdir}/source/parodusStart \
+                                  -I${top_srcdir}/source/include
 
 # Add preprocessor definitions for unit testing with Docker support.
 parodusStart_gtest_bin_CPPFLAGS += -DUNIT_TEST_DOCKER_SUPPORT -DUPDATE_CONFIG_FILE
 
 parodusStart_gtest_bin_SOURCES =  gtest_main.cpp \
                                   $(top_srcdir)/source/parodusStart/start_parodus.c \
-                                  start_parodus_test.cpp \
+                                  parodusStartTest.cpp \
                                   start_parodus_mock.cpp
+
+if DEVICE_GATEWAY
+parodusStart_gtest_bin_CPPFLAGS += -DDEVICE_GATEWAY
+parodusStart_gtest_bin_SOURCES += $(top_srcdir)/source/parodusStart/rdkb/rdkb_imp.c
+endif
+
+if DEVICE_VIDEO
+parodusStart_gtest_bin_CPPFLAGS += -DDEVICE_VIDEO
+parodusStart_gtest_bin_SOURCES += $(top_srcdir)/source/parodusStart/rdkv/impl.c
+endif
 
 parodusStart_gtest_bin_LDFLAGS = -lgtest -lgmock -lgcov -lpthread
 
