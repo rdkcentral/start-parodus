@@ -1,8 +1,10 @@
 name: Unit tests
 
 on:
+  push:
+     branches: [ main, develop, release, feature/* ]
   pull_request:
-    branches: [ develop ]
+     branches: [ main, develop, release, feature/* ]
 
 env:
   AUTOMATICS_UNAME: ${{ secrets.AUTOMATICS_UNAME }}
