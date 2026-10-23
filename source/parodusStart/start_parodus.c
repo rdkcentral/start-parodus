@@ -2146,7 +2146,7 @@ int main(int argc, char *argv[])
 		LogInfo("DB sync is not required or failed to sync!!\n");
 	}
 	paramCount = sizeof(paramList)/sizeof(paramList[0]);
-        "getValuesFromPsmDb(paramList, psmValues, paramCount);
+    getValuesFromPsmDb(paramList, psmValues, paramCount);
 	LogInfo("DB details are %s = %s %s = %s %s = %s\n",paramList[0],psmValues[0],paramList[1],psmValues[1],paramList[2],psmValues[2]);
 	for(i=0;i<paramCount;i++)
 	{
