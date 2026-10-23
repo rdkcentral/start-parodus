@@ -33,7 +33,7 @@
 #include "rdkb/rdkb_imp.h"
 #else
 #include <signal.h>
-#include "rdkb/rdkv_imp.h"
+#include "rdkv/rdkv_imp.h"
 #endif
 
 #define MAX_SERVER_URL_SIZE           64

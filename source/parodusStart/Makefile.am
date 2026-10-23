@@ -34,7 +34,7 @@ AM_CFLAGS += -DDEVICE_GATEWAY
 endif
 
 if DEVICE_VIDEO
-parodusStart_SOURCES += rdkv/impl.c rdkb/rdkv_imp.h
+parodusStart_SOURCES += rdkv/impl.c rdkv/rdkv_imp.h
 AM_CFLAGS += -DDEVICE_VIDEO
 endif
 
