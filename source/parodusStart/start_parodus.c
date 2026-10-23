@@ -159,803 +159,7 @@ static int getDeviceConfigFile();
 STATIC int getPartnerSpecificParam(const char *partner_id, const char *param_name, char **value);
 STATIC void updateWebpaCrucialUrlFromPartnerJson(char *partner_id);
 FILE* g_fArmConsoleLog = NULL;
-/*----------------------------------------------------------------------------*/
-/*                             External Functions                             */
-/*----------------------------------------------------------------------------*/
 
-#ifndef UNIT_TEST_DOCKER_SUPPORT
-int main(int argc, char *argv[])
-{
-	#ifdef INCLUDE_BREAKPAD
-	breakpad_ExceptionHandler();
-	#endif
-	char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
-	char output[MAX_PROCESS_LEN] = {'\0'};
-	FILE *cmd = NULL;
-	const char *pid_cmd = "pidof parodus";
-        errno_t rc = -1;
-        int ind = -1;
-		int Wan_Status_Started = 0;
-	
-        get_parodusStart_logFile(parodusStart_Log);
-
-	g_fArmConsoleLog = freopen(parodusStart_Log, "a+", stderr);
-	if (NULL == g_fArmConsoleLog) 
-	{
-		LogError("Error while opening Log file:%s\n", parodusStart_Log);
-	}
-	else
-	{
-		LogInfo("Successful in opening parodusStart_Log file:%s\n", parodusStart_Log);
-	}
-	
-        if((argc > 1) && (NULL != argv[1]))
-        {
-                rc = strcmp_s("wan-status",strlen("wan-status"),argv[1],&ind);
-                ERR_CHK(rc);
-                if((!ind) && (rc == EOK))
-		{
-		    if(NULL != argv[2]) 
-		    {
-		        LogInfo("wan-status event received with state %s\n", argv[2]);
-			rc = strcmp_s("started",strlen("started"),argv[2],&ind);
-                        ERR_CHK(rc);
-                        if((!ind) && (rc == EOK))
-                        {
-				Wan_Status_Started = 1;
-			}
-		     }
-		     if (Wan_Status_Started)
-		     {
-                        
-			LogInfo("wan-status is ready. Proceed with parodus start up\n");	
-			if ((cmd = popen(pid_cmd, "r")) == NULL)
-			{
-				LogError("Error in getting parodus pid \n");
-				return 0;
-			}
-
-			if(fgets(output,MAX_PROCESS_LEN,cmd) == NULL)
-                               LogError("fgets() error\n");
-			pid_t pid = strtoul(output,NULL,10);// base 10 (decimal)
-			LogInfo("Check parodus pid %d\n",pid);
-			pclose(cmd);
-			if(pid)
-			{
-				LogError("wan-status is ready, but Pardous process is already started/running \n");
-				return 0;
-			}
-
-		      }
-		      else
-		      {
-			  LogInfo("wan-status is not ready , waiting to start parodus..\n");
-			  if (NULL != g_fArmConsoleLog)
-			  fclose(g_fArmConsoleLog);
-			  return 0;
-		      }
-                 }
-	}
-	
-	/*Coverity Fix CID:78992,78513  */
-	char modelName[256]={'\0'};
-	char serialNumber[256]={'\0'};
-	char firmwareVersion[64]={'\0'};
-	char lastRebootReason[128]={'\0'};
-	char deviceMac[64]={'\0'};
-	char webpaInterface[64]={"erouter0"};
-	char manufacturer[64]={'\0'};
-#if defined(_COSA_BCM_MIPS_)
-	dpoe_mac_address_t tDpoe_Mac;
-#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_) && !defined(PON_GATEWAY) && !defined(_WNXL11BWL_PRODUCT_REQ_)
-	CMMGMT_CM_DHCP_INFO dhcpinfo;
-#endif
-	char parodus_url[MAX_SERVER_URL_SIZE] = {'\0'};
-        char seshat_url[MAX_SERVER_URL_SIZE] = {'\0'};
-	char build_type[MAX_BUILD_LEN] = {'\0'};
-	char partner_id[MAX_PARTNERID_LEN] = {'\0'};
-	char tempStr[64] = {'\0'};
-	char *webpaUrl = NULL;
-	cJSON *out = NULL;
-        char command[4096]={'\0'};
-        unsigned int bootTime=0;
-        struct sysinfo s_info;
-        struct timeval currentTime;
-       	int cmdUpdateStatus = -1;
-        int upTime=0, syncStatus= -1;
-	char *paramList[] = {"X_COMCAST-COM_CMC","X_COMCAST-COM_CID","X_COMCAST-COM_SyncProtocolVersion"};
-        char *webpaParamList[] = {"Device.X_RDKCENTRAL-COM_Webpa.Server.URL","Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL","Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL"};
-	int paramCount = 0, i = 0, wait_time = 0;
-	char *psmValues[MAX_VALUE_SIZE] = {'\0'};
-	char *acquireJwt = NULL;
-	int jwtFlag;
-	char final_lastRebootReason[128] = {'\0'};
-    	char rebootCounter[8] = {'\0'};
-	char client_cert_path[128]={'\0'};
-	char ssl_engine[32]="NA";
-	char ssl_cert_type[8]="NA";
-	char ssl_reference_name[128]="NA";
-	int decodeStatus = -1;
-
-#if defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
-	LogInfo("Proceeding to unregister wan-status event\n");
-
-	system("/etc/utopia/registration.d/02_parodus stop");
-#endif
-        LogInfo("startParodus is enabled\n");
-        if ( platform_hal_PandMDBInit() == 0)
-        {
-                LogInfo("PandMDB initiated successfully\n");
-        }
-        else
-        {
-                LogError("Failed to initiate DB\n");
-        }
-        
-        if ( cm_hal_InitDB() == 0)
-        {
-                LogInfo("cm_hal DB initiated successfully\n");
-        }
-        else
-        {
-                LogError("Failed to initiate cm_hal DB\n");
-        }
-
-	if ( platform_hal_GetModelName(modelName) == 0)
-	{
-		LogInfo("modelName returned from hal:%s\n", modelName);
-	}
-        else 
-        {
-        	LogError("Unable to get ModelName\n");
-        	
-    	}
-
-	if ( platform_hal_GetSerialNumber(serialNumber) == 0)
-	{
-		LogInfo("serialNumber returned from hal:%s\n", serialNumber);
-	}
-        else 
-        {
-        	LogError("Unable to get SerialNumber\n");
-    	}
-    	
-    	if ( platform_hal_GetFirmwareName(firmwareVersion, 64) == 0)
-	{
-		LogInfo("firmwareVersion returned from hal:%s\n", firmwareVersion);
-	}
-        else 
-        {
-        	LogError("Unable to get FirmwareName\n");
-    	}
-    	
-
-        rc = strcpy_s(manufacturer, sizeof(manufacturer), CONFIG_VENDOR_NAME);
-        if(rc != EOK)
-        {
-            ERR_CHK(rc);
-            LogError("Failed to get manufacturer name\n");
-        }
-        LogInfo("Manufacturer Name is %s\n", manufacturer);    	
-    	
-    	if (syscfg_init() != 0)
-        {
-        	LogError("syscfg init failure\n");
-                rc = strcpy_s(final_lastRebootReason, sizeof(final_lastRebootReason), "unknown");
-                if(rc != EOK)
-                {
-                    ERR_CHK(rc);
-                    LogError("Failed to copy final_lastRebootReason\n");
-                }
-        }
-        else
-        {
-		syscfg_get( NULL, "X_RDKCENTRAL-COM_LastRebootCounter", rebootCounter, sizeof(rebootCounter));
-
-		/* /var/tmp/lastrebootreason file is created in PAM during bootup. When parodus starts early before PAM, /var/tmp/lastrebootreason file does not exists and if reboot counter is 0, reason is updated as unknown */
-
-		if(access( "/var/tmp/lastrebootreason" , F_OK ) != 0 && ( strlen(rebootCounter)>0 && atoi(rebootCounter) ==0 ))
-		{
-			LogInfo("/var/tmp/lastrebootreason file doesn't exist and rebootCounter is %s\n", rebootCounter);
-                        rc = strcpy_s(final_lastRebootReason, sizeof(final_lastRebootReason), "unknown");
-                        if(rc != EOK)
-                        {
-                            ERR_CHK(rc);
-                            LogError("Failed to copy final_lastRebootReason as unknown\n");
-                        }
-		}
-		else
-		{
-			syscfg_get( NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
-			LogInfo("lastRebootReason is %s\n", lastRebootReason);
-
-			// Strip all spaces and parentheses from reboot reason to make it one word
-			// This also prevents command line parsing issues due to value like '-s'
-			unsigned int i=0, j=0;
-			for(i=0; i < sizeof(lastRebootReason) && j < sizeof(final_lastRebootReason); i++) {
-				if(lastRebootReason[i] != ' ') {
-					if(lastRebootReason[i] != '(')
-					{
-						if(lastRebootReason[i] != ')')
-						{
-							final_lastRebootReason[j]=lastRebootReason[i];
-							j++;
-						}
-					}
-				}
-			}
-		}
-		LogInfo("Modified lastRebootReason is %s\n", final_lastRebootReason);
-	}
-#if defined(_WNXL11BWL_PRODUCT_REQ_)
-    token_t  token;
-    int fd = s_sysevent_connect(&token);
-    /*Coverity Fix:CID 63390 CHECKED_RETURN */
-    if(fd < 0 ){
-        LogError("s_sysevent_connect() is returned Error\n");
-        return -1;
-    }
-
-    FILE *fp;
-    fp = popen("sh /usr/sbin/deviceinfo.sh -cmac", "r");
-    if (NULL != fp) {
-        char acTmpBuffer[32] = {0};
-        char *p = NULL;
-        fgets(acTmpBuffer, sizeof(acTmpBuffer), fp);
-        if(NULL != (strstr(acTmpBuffer, ":" ))) {
-        /* remove the \n char in buffer */
-            if ((p = strchr(acTmpBuffer, '\n')))
-                *p = 0;
-            rc = strcpy_s(deviceMac, sizeof(deviceMac), acTmpBuffer);
-            if(rc != EOK){
-                ERR_CHK(rc);
-                LogError("Failed to Copy TmpBuffer to deviceMac\n");
-            }
-            LogInfo("XLE deviceMac is %s\n", deviceMac);
-            if(fp) {
-                pclose(fp);
-                fp = NULL;
-            }
-        }
-        else {
-            pclose(fp);
-            LogError("eth0 MAC address is empty\n");
-        }
-   }
-#elif defined(_COSA_BCM_MIPS_)
-	if( dpoe_getOnuId(&tDpoe_Mac) == 0)
-	{
-                rc = sprintf_s(deviceMac, sizeof(deviceMac), "%02x:%02x:%02x:%02x:%02x:%02x",tDpoe_Mac.macAddress[0], tDpoe_Mac.macAddress[1],
-                tDpoe_Mac.macAddress[2], tDpoe_Mac.macAddress[3], tDpoe_Mac.macAddress[4],tDpoe_Mac.macAddress[5]);
-		if(rc < EOK)
-                {
-                   ERR_CHK(rc);
-                   LogError("Failed to copy deviceMac\n");
-                }
-		LogInfo("deviceMac is %s\n", deviceMac);
-	}
-        else
-        {
-        	LogError("Unable to get MACAdress\n");
-        }
-#else
-        char isEthEnabled[64]={'\0'};
-        token_t  token;
-        int fd = s_sysevent_connect(&token);
-       
-        /*Coverity Fix:CID 63390 CHECKED_RETURN */
-        if(fd < 0 )
-        {  
-            LogError("s_sysevent_connect() is returned Error\n");
-            return -1;
-        }  
-       
-  
-          
-        char deviceMACValue[32] = { '\0' };
-		int Eth_Enabled = 0;
-		
-		if(0 == syscfg_get( NULL, "eth_wan_enabled", isEthEnabled, sizeof(isEthEnabled)))
-		{
-		if (isEthEnabled[0] != '\0')
-		{
-		   rc = strcmp_s("true",strlen("true"),isEthEnabled,&ind);
-           ERR_CHK(rc);
-           if((!ind) && (rc == EOK))
-		   {
-			  Eth_Enabled = 1;
-		   }		   
-		}
-		}
-		
-        if( Eth_Enabled && sysevent_get(fd, token, "eth_wan_mac", deviceMACValue, sizeof(deviceMACValue)) == 0 && deviceMACValue[0] != '\0')
-        {
-            rc = strcpy_s(deviceMac, sizeof(deviceMac), deviceMACValue);
-            if(rc != EOK)
-            {
-                ERR_CHK(rc);
-                LogError("Failed to Copy deviceMACValue to deviceMac\n");
-            }
-            LogInfo("deviceMac is %s\n", deviceMac);
-        }
-	else
-	{
-          int maxRetryTime = 31;
-          int backoffRetryTime = 0;
-          int c = 2;
-          char *DEFAULT_CM_MAC = "00:1A:2B:11:22:33";
-          while (1)
-          {
-              if (backoffRetryTime < maxRetryTime)
-              {
-                  backoffRetryTime = (int)pow(2, c) - 1;
-              }
-
-	      #if !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_) && !defined(PON_GATEWAY)
-              if (cm_hal_GetDHCPInfo(&dhcpinfo) == 0)
-	      {
-		  LogInfo("MACAddress = %s\n", dhcpinfo.MACAddress);
-                  rc = strcpy_s(deviceMac, sizeof(deviceMac), dhcpinfo.MACAddress);
-	          if(rc != EOK)
-         	  {
-	              ERR_CHK(rc);
-        	      LogError("Failed to Copy dhcpinfo.MACAddress to deviceMac\n");
-                  }
-              #else
-              if (platform_hal_GetBaseMacAddress(deviceMac) == 0)	      
-	      {
-
-                  LogInfo("Mac address  returned from hal:%s\n", deviceMac);     
-              #endif			  
-                  if((strlen(deviceMac) != 0) && (strcmp(deviceMac, DEFAULT_CM_MAC) != 0))
-                  {
-                      LogInfo("deviceMac is %s\n", deviceMac);
-                      break;
-                  }
-
-                  if (strcmp(deviceMac, DEFAULT_CM_MAC) == 0)
-                  {
-                      LogError("Failed to retrieve correct MAC\n");
-                  }
-                  if (strlen(deviceMac) == 0)
-                  {
-                      LogError("Empty MAC Address\n");
-                  }
-	      }
-              LogError("Unable to get MAC Address. Retrying...\n");
-	      LogInfo("New backoffRetryTime value calculated as %d seconds\n", backoffRetryTime);
-              sleep(backoffRetryTime);
-              c++;
-              if (backoffRetryTime >= maxRetryTime)
-              {
-                    LogError("BackoffRetryTime reached max value and Unable to get MACAdress, reseting Start_Parodus\n");
-		    return -1;
-              }
-          }
-	}
-#endif
-
-        while(!bootTime)
-        {
-            if(sysinfo(&s_info))
-            {
-                LogError("Failure in sysinfo fetch.\n");
-            }
-            else
-            {
-                upTime = s_info.uptime;
-                gettimeofday(&currentTime, NULL);
-                bootTime = currentTime.tv_sec - upTime;
-            }
-
-            if(bootTime > 0 && bootTime < UINT_MAX)
-            {
-                LogInfo("bootTime is %u\n", bootTime);
-            }
-            else
-            {
-                if(wait_time >= 60)
-                {
-                    LogError("boot_time is %u. Unable to get valid bootTime even after wait of 60s. Hence setting bootTime value to 0.\n",bootTime);
-                    bootTime = 0;
-                    break;
-                }
-                else
-                {
-                    LogError("boot_time %u is not valid, retry ofter 10s\n",bootTime);
-                    bootTime = 0;
-                    sleep(10);
-                    wait_time = wait_time + 10;
-                }
-            }
-        }
-
-         LogInfo("Fetch parodus url from device.properties file\n");
-         get_url(parodus_url, seshat_url, build_type);
-	 LogInfo("parodus_url returned is %s\n", parodus_url);
-         LogInfo("seshat_url returned is %s\n", seshat_url);
-	 LogInfo("build_type returned is %s\n", build_type);
-
-
-#if defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
-	webpaUrl=(char *)malloc(MAX_SERVER_URL_SIZE * sizeof(char)); 
-	get_webpa_url(webpaUrl);
-#else
-	if(strncmp(build_type, "dev", strlen(build_type)+1) == 0)
-	{
-		getValueFromCfgJson( WEBPA_CFG_SERVER_URL, &webpaUrl, &out);
-		LogInfo("webpaUrl fetched from webpa_cfg.json is %s\n", webpaUrl);
-        checkAndUpdateServerUrlFromDevCfg(&webpaUrl);
-		LogInfo("Framed webpa url is %s\n",webpaUrl);
-		if(out != NULL)
-		{
-			cJSON_Delete(out);
-		}
-	}
-#endif
-
-        getPartnerId(partner_id);
-        LogInfo("PartnerID fetched is %s\n", partner_id);
-        int partnerid_invalid = 0;
-        if(partner_id[0] == '\0')
-        {
-             partnerid_invalid = 1;
-        }
-        else
-        {
-            rc = strcmp_s("unknown",strlen("unknown"),partner_id,&ind);
-            ERR_CHK(rc);
-            if((ind == 0) && (rc == EOK))
-            {
-                partnerid_invalid = 1;
-            }
-        }
-
-        if(partnerid_invalid)
-        {
-           partner_id[0] = '\0';
-        }
-        else
-        {
-                rc = strcpy_s(tempStr, sizeof(tempStr), partner_id);
-                if(rc != EOK)
-                {
-                    ERR_CHK(rc);
-                    goto RETURN_ERROR;
-                }
-                rc = sprintf_s(partner_id,sizeof(partner_id),"*,%s",tempStr);
-                if(rc < EOK)
-                {
-                    ERR_CHK(rc);
-                    goto RETURN_ERROR;
-                }
-        }
-	LogInfo("PartnerID framed is %s\n", partner_id);
-
-	paramCount = sizeof(webpaParamList)/sizeof(webpaParamList[0]);
-        getWebpaValuesFromPsmDb(webpaParamList, psmValues, paramCount);
-        LogInfo("DB details are %s = %s %s = %s %s = %s\n",webpaParamList[0],psmValues[0],webpaParamList[1],psmValues[1],webpaParamList[2],psmValues[2]);
-        for(i=0;i<paramCount;i++)
-        {
-                if(psmValues[i])
-                {    
-	             if(i==0) 
-                     {		
-			WEBPA_SERVER_URL = strdup(psmValues[i]);
-		     } 
-		     else if(i==1) 
-                     {
-			     TOKEN_SERVER_URL = strdup(psmValues[i]);
-		     }
-		     else if(i==2) 
-                     {
-			     DNS_TEXT_URL = strdup(psmValues[i]);
-		     }	     
-		}   
-        }
-	for(i=0;i<paramCount;i++)
-	{
-		if(psmValues[i])
-		{
-			free(psmValues[i]);
-		}
-    }
-
-     LogInfo("WEBPA_SERVER_URL = %s\n", (WEBPA_SERVER_URL != NULL) ? WEBPA_SERVER_URL : "(null)");
-     LogInfo("TOKEN_SERVER_URL = %s\n", (TOKEN_SERVER_URL != NULL) ? TOKEN_SERVER_URL : "(null)");
-     LogInfo("DNS_TEXT_URL = %s\n", (DNS_TEXT_URL != NULL) ? DNS_TEXT_URL : "(null)");
-
-    if (partner_id[0] != '\0')
-    {
-        updateWebpaCrucialUrlFromPartnerJson(partner_id);
-    }
-
-    if(webpaUrl == NULL || webpaUrl[0] == '\0')
-    {
-        LogInfo("Setting webpaUrl to default server IP\n");
-        if(WEBPA_SERVER_URL != NULL && WEBPA_SERVER_URL[0] != '\0')
-        {
-            /* Free existing allocation if webpaUrl is non-NULL but empty */
-            if(webpaUrl != NULL)
-            {
-                free(webpaUrl);
-                webpaUrl = NULL;
-            }
-
-            webpaUrl = strdup(WEBPA_SERVER_URL);
-            if(webpaUrl != NULL)
-            {
-                LogInfo("webpaUrl is %s\n", webpaUrl);
-            }
-            else
-            {
-                LogError("strdup failed for WEBPA_SERVER_URL\n");
-            }
-        }
-        else
-        {
-            LogError("WEBPA_SERVER_URL is NULL or empty, cannot set webpaUrl\n");
-        }
-    }
-    /* Validate webpaUrl is set before proceeding */
-    if(webpaUrl == NULL || webpaUrl[0] == '\0')
-    {
-        LogError("Unable to determine webpa URL, cannot start parodus\n");
-        goto RETURN_ERROR;
-    }
-
-	getValueFromCfgJson( WEBPA_CFG_ACQUIRE_JWT, &acquireJwt, &out);
-	if(out != NULL && acquireJwt != NULL)
-	{
-		jwtFlag = atoi(acquireJwt);
-		cJSON_Delete(out);
-		free(acquireJwt);
-		acquireJwt = NULL;
-	}
-	else
-	{
-		LogInfo("Setting default value to acquire-jwt\n");
-		jwtFlag = ACQUIRE_JWT;
-	}
-	LogInfo("acquire-jwt is %d\n",jwtFlag);
-
-	decodeStatus = getDeviceConfigFile();
-
-	if(decodeStatus == 1)
-	{
-		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), SE_DEVICE_CERT);
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to get SE client_cert_path\n");
-		}
-		else
-		{
-			LogInfo("client_cert_path is %s\n", client_cert_path);
-		}
-
-		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), SE_DEVICE_CERT_REF);
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to get SE cert ssl_reference_name\n");
-		}
-		else
-		{
-			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
-		}
-	}
-	else if(decodeStatus == 2)
-	{
-		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), DEVICE_CERT);
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to get Dynamic client_cert_path\n");
-		}
-		else
-		{
-			LogInfo("client_cert_path is %s\n", client_cert_path);
-		}
-
-		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), DEVICE_CERT_REF);
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to get Dynamic cert ssl_reference_name\n");
-		}
-		else
-		{
-			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
-		}
-	}
-	else if(decodeStatus == 3)
-	{
-		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), STATIC_CERT);
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to get Static client_cert_path\n");
-		}
-		else
-		{
-			LogInfo("client_cert_path is %s\n", client_cert_path);
-		}
-
-		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), STATIC_CERT_REF);
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to get Static cert ssl_reference_name\n");
-		}
-		else
-		{
-			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
-		}
-	}
-	else
-	{
-		LogError("Failed to get client_cert_path\n");
-	}
-
-
-	if((client_cert_path[0] != '\0') && (strcmp(client_cert_path, SE_DEVICE_CERT) == 0))
-	{
-		rc = strcpy_s(ssl_engine, sizeof(ssl_engine), "e4sss");
-		if(rc != EOK)
-		{
-			ERR_CHK(rc);
-			LogError("Failed to set ssl_engine\n");
-		}
-		else
-		{
-			LogInfo("ssl_engine is %s\n", ssl_engine);
-		}
-	}
-
-	rc = strcpy_s(ssl_cert_type, sizeof(ssl_cert_type), "P12");
-	if(rc != EOK)
-	{
-		ERR_CHK(rc);
-		LogError("Failed to get ssl_cert_type\n");
-	}
-	else
-	{
-		LogInfo("ssl_cert_type is %s\n", ssl_cert_type);
-	}
-
-#if defined(WAN_FAILOVER_SUPPORTED) || defined(FEATURE_RDKB_CONFIGURABLE_WAN_INTERFACE)
-	char interfaceValue[64] = { '\0' };
-	if (sysevent_get(fd, token, "current_wan_ifname", interfaceValue, sizeof(interfaceValue)) == 0)
-	{
-	    rc = strcpy_s(webpaInterface, sizeof(webpaInterface), interfaceValue);
-            if(rc != EOK)
-            {
-                ERR_CHK(rc);
-                LogError("Failed to Copy interfaceValue to webpaInterface\n");
-            }
-            LogInfo("webpaInterface is %s\n", webpaInterface);
-	}
-        else
-        {
-          LogError("Failed to get interface value\n");
-        }
-#endif
-	LogInfo("Framing command for parodus\n");
-	//Enabling parodus by forcing to ipv4
-        memset(command, '\0', sizeof(command));
-        char max_queue_size[24] = {'\0'};/*fix for CID : 277584, 306237 - BRANCH PAST INITIALIZATION */
-#if defined (ENABLE_SESHAT) && defined (FEATURE_DNS_QUERY)
-        rc = sprintf_s(command, sizeof(command),
-	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --seshat-url=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --acquire-jwt=%d --dns-txt-url=%s --jwt-public-key-file=%s --jwt-algo=RS256 --record-jwt-payload=%s --crud-config-file=%s --boot-time-retry-wait=%d &",
-        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, seshat_url, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, jwtFlag, DNS_TEXT_URL, JWT_KEY, RECORD_JWT_PAYLOAD_FILE, CRUD_CONFIG_FILE, wait_time);
-       if(rc < EOK)
-       {
-          ERR_CHK(rc);
-          goto RETURN_ERROR;
-       }
-#elif defined ENABLE_SESHAT
-       rc = sprintf_s(command, sizeof(command),
-	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --seshat-url=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --crud-config-file=%s --boot-time-retry-wait=%d &", 
-        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, seshat_url, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, CRUD_CONFIG_FILE, wait_time);
-     if(rc < EOK)
-     {
-        ERR_CHK(rc);
-        goto RETURN_ERROR;
-     }
-#elif defined FEATURE_DNS_QUERY
-     rc = sprintf_s(command, sizeof(command),
-	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --acquire-jwt=%d --dns-txt-url=%s --jwt-public-key-file=%s --jwt-algo=RS256 --record-jwt-payload=%s --crud-config-file=%s --boot-time-retry-wait=%d &",
-        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, jwtFlag, DNS_TEXT_URL, JWT_KEY, RECORD_JWT_PAYLOAD_FILE, CRUD_CONFIG_FILE, wait_time);
-    if(rc < EOK)
-    {
-        ERR_CHK(rc);
-        goto RETURN_ERROR;
-    }
-#else
-    rc = sprintf_s(command, sizeof(command),
-	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --crud-config-file=%s --boot-time-retry-wait=%d &", 
-        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, CRUD_CONFIG_FILE, wait_time);
-    if(rc < EOK)
-    {
-       ERR_CHK(rc);
-       goto RETURN_ERROR;
-    }
-#endif
-
-#ifdef ENABLE_WEBCFGBIN
-       #define MAX_QUEUE_SIZE 10
-       memset(max_queue_size, '\0', sizeof(max_queue_size));
-       snprintf(max_queue_size,sizeof(max_queue_size),"--max-queue-size=%d &", MAX_QUEUE_SIZE);
-       //To remove the '&' from command
-       command[strlen(command)-1] = '\0';
-       strncat(command,max_queue_size,sizeof(command)-1);//FIX FOR CID : 56316 - CALLING RISKY FUNCTION
-#endif
-
-	LogInfo("parodus command formed is: %s\n", command);
-	
-	cmdUpdateStatus = addParodusCmdToFile(command);
-	if(cmdUpdateStatus == 0)
-	{
-		LogInfo("Added parodus cmd to file\n");
-	}
-	else
-	{
-		LogError("Error in adding parodus cmd to file\n");
-	}
-
-	if(webpaUrl != NULL)
-	{
-		free(webpaUrl);
-		webpaUrl = NULL;
-	}
-	/* Wait till PSM health is green before PSM DB sync */
-       waitForPSMHealth(PSM_COMPONENT_NAME);
-		
-	syncStatus = syncXpcParamsOnUpgrade(lastRebootReason, firmwareVersion);
-	if(syncStatus == 0)
-	{
-		LogInfo("DB synced successfully on firmware upgrade\n");
-	}
-	else if(syncStatus == -2)
-	{
-		LogInfo("PARODUS: Failed to sync DB during Firmware Upgrade\n");
-	}
-	else
-	{
-		LogInfo("DB sync is not required or failed to sync!!\n");
-	}
-	paramCount = sizeof(paramList)/sizeof(paramList[0]);
-        getValuesFromPsmDb(paramList, psmValues, paramCount);
-	LogInfo("DB details are %s = %s %s = %s %s = %s\n",paramList[0],psmValues[0],paramList[1],psmValues[1],paramList[2],psmValues[2]);
-	for(i=0;i<paramCount;i++)
-	{
-		if(psmValues[i])
-		{
-			free(psmValues[i]);
-		}
-	}
-
-#ifdef START_PARODUS
-	LogInfo("Starting parodus process ..\n");
-	system(command);
-#endif
-	
-    	if (NULL != g_fArmConsoleLog)
-		fclose(g_fArmConsoleLog);
-	return 0;
-	
-RETURN_ERROR:
-       if(webpaUrl != NULL)
-       {
-          free(webpaUrl);
-          webpaUrl = NULL;
-       }
-       LogError("main function - RETURN_ERROR\n");
-       return -1;
-	
-}
-#endif // UNIT_TEST_DOCKER_SUPPORT
 
 /*----------------------------------------------------------------------------*/
 /*                             Internal functions                             */
@@ -2159,3 +1363,817 @@ static int getDeviceConfigFile()
 	}
 	return rv;
 }
+
+
+
+
+/*----------------------------------------------------------------------------*/
+/*                             External Functions                             */
+/*----------------------------------------------------------------------------*/
+
+#ifndef UNIT_TEST_DOCKER_SUPPORT
+int main(int argc, char *argv[])
+{
+	#ifdef INCLUDE_BREAKPAD
+	breakpad_ExceptionHandler();
+	#endif
+	char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
+	char output[MAX_PROCESS_LEN] = {'\0'};
+	FILE *cmd = NULL;
+	const char *pid_cmd = "pidof parodus";
+    errno_t rc = -1;
+    int ind = -1;
+	int Wan_Status_Started = 0;
+	
+    get_parodusStart_logFile(parodusStart_Log);
+
+	g_fArmConsoleLog = freopen(parodusStart_Log, "a+", stderr);
+	if (NULL == g_fArmConsoleLog) 
+	{
+		LogError("Error while opening Log file:%s\n", parodusStart_Log);
+	}
+	else
+	{
+		LogInfo("Successful in opening parodusStart_Log file:%s\n", parodusStart_Log);
+	}
+	
+    if((argc > 1) && (NULL != argv[1]))
+    {
+                rc = strcmp_s("wan-status",strlen("wan-status"),argv[1],&ind);
+                ERR_CHK(rc);
+                if((!ind) && (rc == EOK))
+		{
+		    if(NULL != argv[2]) 
+		    {
+		        LogInfo("wan-status event received with state %s\n", argv[2]);
+			rc = strcmp_s("started",strlen("started"),argv[2],&ind);
+                        ERR_CHK(rc);
+                        if((!ind) && (rc == EOK))
+                        {
+				Wan_Status_Started = 1;
+			}
+		     }
+		     if (Wan_Status_Started)
+		     {
+                        
+			LogInfo("wan-status is ready. Proceed with parodus start up\n");	
+			if ((cmd = popen(pid_cmd, "r")) == NULL)
+			{
+				LogError("Error in getting parodus pid \n");
+				return 0;
+			}
+
+			if(fgets(output,MAX_PROCESS_LEN,cmd) == NULL)
+                               LogError("fgets() error\n");
+			pid_t pid = strtoul(output,NULL,10);// base 10 (decimal)
+			LogInfo("Check parodus pid %d\n",pid);
+			pclose(cmd);
+			if(pid)
+			{
+				LogError("wan-status is ready, but Pardous process is already started/running \n");
+				return 0;
+			}
+
+		      }
+		      else
+		      {
+			  LogInfo("wan-status is not ready , waiting to start parodus..\n");
+			  if (NULL != g_fArmConsoleLog)
+			  fclose(g_fArmConsoleLog);
+			  return 0;
+		      }
+                 }
+	}
+	
+	/*Coverity Fix CID:78992,78513  */
+	char modelName[256]={'\0'};
+	char serialNumber[256]={'\0'};
+	char firmwareVersion[64]={'\0'};
+	char lastRebootReason[128]={'\0'};
+	char deviceMac[64]={'\0'};
+	char webpaInterface[64]={"erouter0"};
+	char manufacturer[64]={'\0'};
+#if defined(_COSA_BCM_MIPS_)
+	dpoe_mac_address_t tDpoe_Mac;
+#elif !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_) && !defined(PON_GATEWAY) && !defined(_WNXL11BWL_PRODUCT_REQ_)
+	CMMGMT_CM_DHCP_INFO dhcpinfo;
+#endif
+	char parodus_url[MAX_SERVER_URL_SIZE] = {'\0'};
+        char seshat_url[MAX_SERVER_URL_SIZE] = {'\0'};
+	char build_type[MAX_BUILD_LEN] = {'\0'};
+	char partner_id[MAX_PARTNERID_LEN] = {'\0'};
+	char tempStr[64] = {'\0'};
+	char *webpaUrl = NULL;
+	cJSON *out = NULL;
+        char command[4096]={'\0'};
+        unsigned int bootTime=0;
+        struct sysinfo s_info;
+        struct timeval currentTime;
+       	int cmdUpdateStatus = -1;
+        int upTime=0, syncStatus= -1;
+	char *paramList[] = {"X_COMCAST-COM_CMC","X_COMCAST-COM_CID","X_COMCAST-COM_SyncProtocolVersion"};
+        char *webpaParamList[] = {"Device.X_RDKCENTRAL-COM_Webpa.Server.URL","Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL","Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL"};
+	int paramCount = 0, i = 0, wait_time = 0;
+	char *psmValues[MAX_VALUE_SIZE] = {'\0'};
+	char *acquireJwt = NULL;
+	int jwtFlag;
+	char final_lastRebootReason[128] = {'\0'};
+    	char rebootCounter[8] = {'\0'};
+	char client_cert_path[128]={'\0'};
+	char ssl_engine[32]="NA";
+	char ssl_cert_type[8]="NA";
+	char ssl_reference_name[128]="NA";
+	int decodeStatus = -1;
+
+#if defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
+	LogInfo("Proceeding to unregister wan-status event\n");
+
+	system("/etc/utopia/registration.d/02_parodus stop");
+#endif
+        LogInfo("startParodus is enabled\n");
+        if ( platform_hal_PandMDBInit() == 0)
+        {
+                LogInfo("PandMDB initiated successfully\n");
+        }
+        else
+        {
+                LogError("Failed to initiate DB\n");
+        }
+        
+        if ( cm_hal_InitDB() == 0)
+        {
+            LogInfo("cm_hal DB initiated successfully\n");
+        }
+        else
+        {
+                LogError("Failed to initiate cm_hal DB\n");
+        }
+
+	if ( platform_hal_GetModelName(modelName) == 0)
+	{
+		LogInfo("modelName returned from hal:%s\n", modelName);
+	}
+        else 
+        {
+        	LogError("Unable to get ModelName\n");
+        	
+    	}
+
+	if ( platform_hal_GetSerialNumber(serialNumber) == 0)
+	{
+		LogInfo("serialNumber returned from hal:%s\n", serialNumber);
+	}
+        else 
+        {
+        	LogError("Unable to get SerialNumber\n");
+    	}
+    	
+    	if ( platform_hal_GetFirmwareName(firmwareVersion, 64) == 0)
+	{
+		LogInfo("firmwareVersion returned from hal:%s\n", firmwareVersion);
+	}
+        else 
+        {
+        	LogError("Unable to get FirmwareName\n");
+    	}
+    	
+
+        rc = strcpy_s(manufacturer, sizeof(manufacturer), CONFIG_VENDOR_NAME);
+        if(rc != EOK)
+        {
+            ERR_CHK(rc);
+            LogError("Failed to get manufacturer name\n");
+        }
+        LogInfo("Manufacturer Name is %s\n", manufacturer);    	
+    	
+    	if (syscfg_init() != 0)
+        {
+        	LogError("syscfg init failure\n");
+                rc = strcpy_s(final_lastRebootReason, sizeof(final_lastRebootReason), "unknown");
+                if(rc != EOK)
+                {
+                    ERR_CHK(rc);
+                    LogError("Failed to copy final_lastRebootReason\n");
+                }
+        }
+        else
+        {
+		syscfg_get( NULL, "X_RDKCENTRAL-COM_LastRebootCounter", rebootCounter, sizeof(rebootCounter));
+
+		/* /var/tmp/lastrebootreason file is created in PAM during bootup. When parodus starts early before PAM, /var/tmp/lastrebootreason file does not exists and if reboot counter is 0, reason is updated as unknown */
+
+		if(access( "/var/tmp/lastrebootreason" , F_OK ) != 0 && ( strlen(rebootCounter)>0 && atoi(rebootCounter) ==0 ))
+		{
+			LogInfo("/var/tmp/lastrebootreason file doesn't exist and rebootCounter is %s\n", rebootCounter);
+                        rc = strcpy_s(final_lastRebootReason, sizeof(final_lastRebootReason), "unknown");
+                        if(rc != EOK)
+                        {
+                            ERR_CHK(rc);
+                            LogError("Failed to copy final_lastRebootReason as unknown\n");
+                        }
+		}
+		else
+		{
+			syscfg_get( NULL, "X_RDKCENTRAL-COM_LastRebootReason", lastRebootReason, sizeof(lastRebootReason));
+			LogInfo("lastRebootReason is %s\n", lastRebootReason);
+
+			// Strip all spaces and parentheses from reboot reason to make it one word
+			// This also prevents command line parsing issues due to value like '-s'
+			unsigned int i=0, j=0;
+			for(i=0; i < sizeof(lastRebootReason) && j < sizeof(final_lastRebootReason); i++) {
+				if(lastRebootReason[i] != ' ') {
+					if(lastRebootReason[i] != '(')
+					{
+						if(lastRebootReason[i] != ')')
+						{
+							final_lastRebootReason[j]=lastRebootReason[i];
+							j++;
+						}
+					}
+				}
+			}
+		}
+		LogInfo("Modified lastRebootReason is %s\n", final_lastRebootReason);
+	}
+#if defined(_WNXL11BWL_PRODUCT_REQ_)
+    token_t  token;
+    int fd = s_sysevent_connect(&token);
+    /*Coverity Fix:CID 63390 CHECKED_RETURN */
+    if(fd < 0 ){
+        LogError("s_sysevent_connect() is returned Error\n");
+        return -1;
+    }
+
+    FILE *fp;
+    fp = popen("sh /usr/sbin/deviceinfo.sh -cmac", "r");
+    if (NULL != fp) {
+        char acTmpBuffer[32] = {0};
+        char *p = NULL;
+        fgets(acTmpBuffer, sizeof(acTmpBuffer), fp);
+        if(NULL != (strstr(acTmpBuffer, ":" ))) {
+        /* remove the \n char in buffer */
+            if ((p = strchr(acTmpBuffer, '\n')))
+                *p = 0;
+            rc = strcpy_s(deviceMac, sizeof(deviceMac), acTmpBuffer);
+            if(rc != EOK){
+                ERR_CHK(rc);
+                LogError("Failed to Copy TmpBuffer to deviceMac\n");
+            }
+            LogInfo("XLE deviceMac is %s\n", deviceMac);
+            if(fp) {
+                pclose(fp);
+                fp = NULL;
+            }
+        }
+        else {
+            pclose(fp);
+            LogError("eth0 MAC address is empty\n");
+        }
+   }
+#elif defined(_COSA_BCM_MIPS_)
+	if( dpoe_getOnuId(&tDpoe_Mac) == 0)
+	{
+                rc = sprintf_s(deviceMac, sizeof(deviceMac), "%02x:%02x:%02x:%02x:%02x:%02x",tDpoe_Mac.macAddress[0], tDpoe_Mac.macAddress[1],
+                tDpoe_Mac.macAddress[2], tDpoe_Mac.macAddress[3], tDpoe_Mac.macAddress[4],tDpoe_Mac.macAddress[5]);
+		if(rc < EOK)
+                {
+                   ERR_CHK(rc);
+                   LogError("Failed to copy deviceMac\n");
+                }
+		LogInfo("deviceMac is %s\n", deviceMac);
+	}
+        else
+        {
+        	LogError("Unable to get MACAdress\n");
+        }
+#else
+        char isEthEnabled[64]={'\0'};
+        token_t  token;
+        int fd = s_sysevent_connect(&token);
+       
+        /*Coverity Fix:CID 63390 CHECKED_RETURN */
+        if(fd < 0 )
+        {  
+            LogError("s_sysevent_connect() is returned Error\n");
+            return -1;
+        }  
+       
+  
+          
+        char deviceMACValue[32] = { '\0' };
+		int Eth_Enabled = 0;
+		
+		if(0 == syscfg_get( NULL, "eth_wan_enabled", isEthEnabled, sizeof(isEthEnabled)))
+		{
+		if (isEthEnabled[0] != '\0')
+		{
+		   rc = strcmp_s("true",strlen("true"),isEthEnabled,&ind);
+           ERR_CHK(rc);
+           if((!ind) && (rc == EOK))
+		   {
+			  Eth_Enabled = 1;
+		   }		   
+		}
+		}
+		
+        if( Eth_Enabled && sysevent_get(fd, token, "eth_wan_mac", deviceMACValue, sizeof(deviceMACValue)) == 0 && deviceMACValue[0] != '\0')
+        {
+            rc = strcpy_s(deviceMac, sizeof(deviceMac), deviceMACValue);
+            if(rc != EOK)
+            {
+                ERR_CHK(rc);
+                LogError("Failed to Copy deviceMACValue to deviceMac\n");
+            }
+            LogInfo("deviceMac is %s\n", deviceMac);
+        }
+	else
+	{
+          int maxRetryTime = 31;
+          int backoffRetryTime = 0;
+          int c = 2;
+          char *DEFAULT_CM_MAC = "00:1A:2B:11:22:33";
+          while (1)
+          {
+              if (backoffRetryTime < maxRetryTime)
+              {
+                  backoffRetryTime = (int)pow(2, c) - 1;
+              }
+
+	      #if !defined(_PLATFORM_RASPBERRYPI_) && !defined(_PLATFORM_BANANAPI_R4_) && !defined(_PLATFORM_GENERICARM_) && !defined(PON_GATEWAY)
+              if (cm_hal_GetDHCPInfo(&dhcpinfo) == 0)
+	      {
+		  LogInfo("MACAddress = %s\n", dhcpinfo.MACAddress);
+                  rc = strcpy_s(deviceMac, sizeof(deviceMac), dhcpinfo.MACAddress);
+	          if(rc != EOK)
+         	  {
+	              ERR_CHK(rc);
+        	      LogError("Failed to Copy dhcpinfo.MACAddress to deviceMac\n");
+                  }
+              #else
+              if (platform_hal_GetBaseMacAddress(deviceMac) == 0)	      
+	      {
+
+                  LogInfo("Mac address  returned from hal:%s\n", deviceMac);     
+              #endif			  
+                  if((strlen(deviceMac) != 0) && (strcmp(deviceMac, DEFAULT_CM_MAC) != 0))
+                  {
+                      LogInfo("deviceMac is %s\n", deviceMac);
+                      break;
+                  }
+
+                  if (strcmp(deviceMac, DEFAULT_CM_MAC) == 0)
+                  {
+                      LogError("Failed to retrieve correct MAC\n");
+                  }
+                  if (strlen(deviceMac) == 0)
+                  {
+                      LogError("Empty MAC Address\n");
+                  }
+	      }
+              LogError("Unable to get MAC Address. Retrying...\n");
+	      LogInfo("New backoffRetryTime value calculated as %d seconds\n", backoffRetryTime);
+              sleep(backoffRetryTime);
+              c++;
+              if (backoffRetryTime >= maxRetryTime)
+              {
+                    LogError("BackoffRetryTime reached max value and Unable to get MACAdress, reseting Start_Parodus\n");
+		    return -1;
+              }
+          }
+	}
+#endif
+
+        while(!bootTime)
+        {
+            if(sysinfo(&s_info))
+            {
+                LogError("Failure in sysinfo fetch.\n");
+            }
+            else
+            {
+                upTime = s_info.uptime;
+                gettimeofday(&currentTime, NULL);
+                bootTime = currentTime.tv_sec - upTime;
+            }
+
+            if(bootTime > 0 && bootTime < UINT_MAX)
+            {
+                LogInfo("bootTime is %u\n", bootTime);
+            }
+            else
+            {
+                if(wait_time >= 60)
+                {
+                    LogError("boot_time is %u. Unable to get valid bootTime even after wait of 60s. Hence setting bootTime value to 0.\n",bootTime);
+                    bootTime = 0;
+                    break;
+                }
+                else
+                {
+                    LogError("boot_time %u is not valid, retry ofter 10s\n",bootTime);
+                    bootTime = 0;
+                    sleep(10);
+                    wait_time = wait_time + 10;
+                }
+            }
+        }
+
+         LogInfo("Fetch parodus url from device.properties file\n");
+         get_url(parodus_url, seshat_url, build_type);
+	 LogInfo("parodus_url returned is %s\n", parodus_url);
+         LogInfo("seshat_url returned is %s\n", seshat_url);
+	 LogInfo("build_type returned is %s\n", build_type);
+
+
+#if defined(_PLATFORM_BANANAPI_R4_) || defined(_PLATFORM_GENERICARM_)
+	webpaUrl=(char *)malloc(MAX_SERVER_URL_SIZE * sizeof(char)); 
+	get_webpa_url(webpaUrl);
+#else
+	if(strncmp(build_type, "dev", strlen(build_type)+1) == 0)
+	{
+		getValueFromCfgJson( WEBPA_CFG_SERVER_URL, &webpaUrl, &out);
+		LogInfo("webpaUrl fetched from webpa_cfg.json is %s\n", webpaUrl);
+        checkAndUpdateServerUrlFromDevCfg(&webpaUrl);
+		LogInfo("Framed webpa url is %s\n",webpaUrl);
+		if(out != NULL)
+		{
+			cJSON_Delete(out);
+		}
+	}
+#endif
+
+        getPartnerId(partner_id);
+        LogInfo("PartnerID fetched is %s\n", partner_id);
+        int partnerid_invalid = 0;
+        if(partner_id[0] == '\0')
+        {
+             partnerid_invalid = 1;
+        }
+        else
+        {
+            rc = strcmp_s("unknown",strlen("unknown"),partner_id,&ind);
+            ERR_CHK(rc);
+            if((ind == 0) && (rc == EOK))
+            {
+                partnerid_invalid = 1;
+            }
+        }
+
+        if(partnerid_invalid)
+        {
+           partner_id[0] = '\0';
+        }
+        else
+        {
+                rc = strcpy_s(tempStr, sizeof(tempStr), partner_id);
+                if(rc != EOK)
+                {
+                    ERR_CHK(rc);
+                    goto RETURN_ERROR;
+                }
+                rc = sprintf_s(partner_id,sizeof(partner_id),"*,%s",tempStr);
+                if(rc < EOK)
+                {
+                    ERR_CHK(rc);
+                    goto RETURN_ERROR;
+                }
+        }
+	LogInfo("PartnerID framed is %s\n", partner_id);
+
+	paramCount = sizeof(webpaParamList)/sizeof(webpaParamList[0]);
+        getWebpaValuesFromPsmDb(webpaParamList, psmValues, paramCount);
+        LogInfo("DB details are %s = %s %s = %s %s = %s\n",webpaParamList[0],psmValues[0],webpaParamList[1],psmValues[1],webpaParamList[2],psmValues[2]);
+        for(i=0;i<paramCount;i++)
+        {
+                if(psmValues[i])
+                {    
+	             if(i==0) 
+                     {		
+			WEBPA_SERVER_URL = strdup(psmValues[i]);
+		     } 
+		     else if(i==1) 
+                     {
+			     TOKEN_SERVER_URL = strdup(psmValues[i]);
+		     }
+		     else if(i==2) 
+                     {
+			     DNS_TEXT_URL = strdup(psmValues[i]);
+		     }	     
+		}   
+        }
+	for(i=0;i<paramCount;i++)
+	{
+		if(psmValues[i])
+		{
+			free(psmValues[i]);
+		}
+    }
+
+     LogInfo("WEBPA_SERVER_URL = %s\n", (WEBPA_SERVER_URL != NULL) ? WEBPA_SERVER_URL : "(null)");
+     LogInfo("TOKEN_SERVER_URL = %s\n", (TOKEN_SERVER_URL != NULL) ? TOKEN_SERVER_URL : "(null)");
+     LogInfo("DNS_TEXT_URL = %s\n", (DNS_TEXT_URL != NULL) ? DNS_TEXT_URL : "(null)");
+
+    if (partner_id[0] != '\0')
+    {
+        updateWebpaCrucialUrlFromPartnerJson(partner_id);
+    }
+
+    if(webpaUrl == NULL || webpaUrl[0] == '\0')
+    {
+        LogInfo("Setting webpaUrl to default server IP\n");
+        if(WEBPA_SERVER_URL != NULL && WEBPA_SERVER_URL[0] != '\0')
+        {
+            /* Free existing allocation if webpaUrl is non-NULL but empty */
+            if(webpaUrl != NULL)
+            {
+                free(webpaUrl);
+                webpaUrl = NULL;
+            }
+
+            webpaUrl = strdup(WEBPA_SERVER_URL);
+            if(webpaUrl != NULL)
+            {
+                LogInfo("webpaUrl is %s\n", webpaUrl);
+            }
+            else
+            {
+                LogError("strdup failed for WEBPA_SERVER_URL\n");
+            }
+        }
+        else
+        {
+            LogError("WEBPA_SERVER_URL is NULL or empty, cannot set webpaUrl\n");
+        }
+    }
+    /* Validate webpaUrl is set before proceeding */
+    if(webpaUrl == NULL || webpaUrl[0] == '\0')
+    {
+        LogError("Unable to determine webpa URL, cannot start parodus\n");
+        goto RETURN_ERROR;
+    }
+
+	getValueFromCfgJson( WEBPA_CFG_ACQUIRE_JWT, &acquireJwt, &out);
+	if(out != NULL && acquireJwt != NULL)
+	{
+		jwtFlag = atoi(acquireJwt);
+		cJSON_Delete(out);
+		free(acquireJwt);
+		acquireJwt = NULL;
+	}
+	else
+	{
+		LogInfo("Setting default value to acquire-jwt\n");
+		jwtFlag = ACQUIRE_JWT;
+	}
+	LogInfo("acquire-jwt is %d\n",jwtFlag);
+
+	decodeStatus = getDeviceConfigFile();
+
+	if (decodeStatus == 0)
+	{
+		LogInfo("TEST: decodeStatus %d\n", decodeStatus);
+	}
+	else if(decodeStatus == 1)
+	{
+		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), SE_DEVICE_CERT);
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to get SE client_cert_path\n");
+		}
+		else
+		{
+			LogInfo("client_cert_path is %s\n", client_cert_path);
+		}
+
+		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), SE_DEVICE_CERT_REF);
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to get SE cert ssl_reference_name\n");
+		}
+		else
+		{
+			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
+		}
+	}
+	else if(decodeStatus == 2)
+	{
+		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), DEVICE_CERT);
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to get Dynamic client_cert_path\n");
+		}
+		else
+		{
+			LogInfo("client_cert_path is %s\n", client_cert_path);
+		}
+
+		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), DEVICE_CERT_REF);
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to get Dynamic cert ssl_reference_name\n");
+		}
+		else
+		{
+			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
+		}
+	}
+	else if(decodeStatus == 3)
+	{
+		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), STATIC_CERT);
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to get Static client_cert_path\n");
+		}
+		else
+		{
+			LogInfo("client_cert_path is %s\n", client_cert_path);
+		}
+
+		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), STATIC_CERT_REF);
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to get Static cert ssl_reference_name\n");
+		}
+		else
+		{
+			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
+		}
+	}
+	else
+	{
+		LogError("Failed to get client_cert_path\n");
+	}
+
+
+	if((client_cert_path[0] != '\0') && (strcmp(client_cert_path, SE_DEVICE_CERT) == 0))
+	{
+		rc = strcpy_s(ssl_engine, sizeof(ssl_engine), "e4sss");
+		if(rc != EOK)
+		{
+			ERR_CHK(rc);
+			LogError("Failed to set ssl_engine\n");
+		}
+		else
+		{
+			LogInfo("ssl_engine is %s\n", ssl_engine);
+		}
+	}
+
+	
+	LogInfo("updating ssl_cert_type \n");	
+	rc = strcpy_s(ssl_cert_type, sizeof(ssl_cert_type), "P12");
+	if(rc != EOK)
+	{
+		ERR_CHK(rc);
+		LogError("Failed to get ssl_cert_type\n");
+	}
+	else
+	{
+		LogInfo("ssl_cert_type is %s\n", ssl_cert_type);
+	}
+
+#if defined(WAN_FAILOVER_SUPPORTED) || defined(FEATURE_RDKB_CONFIGURABLE_WAN_INTERFACE)
+	char interfaceValue[64] = { '\0' };
+	if (sysevent_get(fd, token, "current_wan_ifname", interfaceValue, sizeof(interfaceValue)) == 0)
+	{
+	    rc = strcpy_s(webpaInterface, sizeof(webpaInterface), interfaceValue);
+            if(rc != EOK)
+            {
+                ERR_CHK(rc);
+                LogError("Failed to Copy interfaceValue to webpaInterface\n");
+            }
+            LogInfo("webpaInterface is %s\n", webpaInterface);
+	}
+        else
+        {
+          LogError("Failed to get interface value\n");
+        }
+#endif
+	
+		
+		
+		
+		
+		
+	LogInfo("Framing command for parodus\n");
+	//Enabling parodus by forcing to ipv4
+        memset(command, '\0', sizeof(command));
+        char max_queue_size[24] = {'\0'};/*fix for CID : 277584, 306237 - BRANCH PAST INITIALIZATION */
+#if defined (ENABLE_SESHAT) && defined (FEATURE_DNS_QUERY)
+        rc = sprintf_s(command, sizeof(command),
+	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --seshat-url=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --acquire-jwt=%d --dns-txt-url=%s --jwt-public-key-file=%s --jwt-algo=RS256 --record-jwt-payload=%s --crud-config-file=%s --boot-time-retry-wait=%d &",
+        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, seshat_url, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, jwtFlag, DNS_TEXT_URL, JWT_KEY, RECORD_JWT_PAYLOAD_FILE, CRUD_CONFIG_FILE, wait_time);
+       if(rc < EOK)
+       {
+          ERR_CHK(rc);
+          goto RETURN_ERROR;
+       }
+#elif defined ENABLE_SESHAT
+       rc = sprintf_s(command, sizeof(command),
+	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --seshat-url=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --crud-config-file=%s --boot-time-retry-wait=%d &", 
+        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, seshat_url, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, CRUD_CONFIG_FILE, wait_time);
+     if(rc < EOK)
+     {
+        ERR_CHK(rc);
+        goto RETURN_ERROR;
+     }
+#elif defined FEATURE_DNS_QUERY
+     rc = sprintf_s(command, sizeof(command),
+	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --acquire-jwt=%d --dns-txt-url=%s --jwt-public-key-file=%s --jwt-algo=RS256 --record-jwt-payload=%s --crud-config-file=%s --boot-time-retry-wait=%d &",
+        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, jwtFlag, DNS_TEXT_URL, JWT_KEY, RECORD_JWT_PAYLOAD_FILE, CRUD_CONFIG_FILE, wait_time);
+    if(rc < EOK)
+    {
+        ERR_CHK(rc);
+        goto RETURN_ERROR;
+    }
+#else
+    rc = sprintf_s(command, sizeof(command),
+	"/usr/bin/parodus --hw-model=\"%s\" --hw-serial-number=%s --hw-manufacturer=\"%s\" --hw-last-reboot-reason=\"%s\" --fw-name=%s --boot-time=%u --hw-mac=%s --webpa-ping-time=180 --webpa-interface-used=%s --webpa-url=%s --webpa-backoff-max=8 --parodus-local-url=%s --partner-id=%s --ssl-cert-path=%s --connection-health-file=%s --client-cert-path=%s --ssl-engine=%s --ssl-cert-type=%s --ssl-reference-name=%s --token-server-url=%s --crud-config-file=%s --boot-time-retry-wait=%d &", 
+        modelName, serialNumber, manufacturer, final_lastRebootReason, firmwareVersion, bootTime, deviceMac, webpaInterface, webpaUrl, ((NULL != parodus_url) ? parodus_url : PARODUS_UPSTREAM), partner_id, SSL_CERT_BUNDLE, PARCONNHEALTH_FILE, client_cert_path, ssl_engine, ssl_cert_type, ssl_reference_name, TOKEN_SERVER_URL, CRUD_CONFIG_FILE, wait_time);
+    if(rc < EOK)
+    {
+       ERR_CHK(rc);
+       goto RETURN_ERROR;
+    }
+#endif
+
+#ifdef ENABLE_WEBCFGBIN
+       #define MAX_QUEUE_SIZE 10
+       memset(max_queue_size, '\0', sizeof(max_queue_size));
+       snprintf(max_queue_size,sizeof(max_queue_size),"--max-queue-size=%d &", MAX_QUEUE_SIZE);
+       //To remove the '&' from command
+       command[strlen(command)-1] = '\0';
+       strncat(command,max_queue_size,sizeof(command)-1);//FIX FOR CID : 56316 - CALLING RISKY FUNCTION
+#endif
+
+	LogInfo("parodus command formed is: %s\n", command);
+	
+	cmdUpdateStatus = addParodusCmdToFile(command);
+	if(cmdUpdateStatus == 0)
+	{
+		LogInfo("Added parodus cmd to file\n");
+	}
+	else
+	{
+		LogError("Error in adding parodus cmd to file\n");
+	}
+
+	if(webpaUrl != NULL)
+	{
+		free(webpaUrl);
+		webpaUrl = NULL;
+	}
+	/* Wait till PSM health is green before PSM DB sync */
+       waitForPSMHealth(PSM_COMPONENT_NAME);
+		
+	syncStatus = syncXpcParamsOnUpgrade(lastRebootReason, firmwareVersion);
+	if(syncStatus == 0)
+	{
+		LogInfo("DB synced successfully on firmware upgrade\n");
+	}
+	else if(syncStatus == -2)
+	{
+		LogInfo("PARODUS: Failed to sync DB during Firmware Upgrade\n");
+	}
+	else
+	{
+		LogInfo("DB sync is not required or failed to sync!!\n");
+	}
+	paramCount = sizeof(paramList)/sizeof(paramList[0]);
+        "getValuesFromPsmDb(paramList, psmValues, paramCount);
+	LogInfo("DB details are %s = %s %s = %s %s = %s\n",paramList[0],psmValues[0],paramList[1],psmValues[1],paramList[2],psmValues[2]);
+	for(i=0;i<paramCount;i++)
+	{
+		if(psmValues[i])
+		{
+			free(psmValues[i]);
+		}
+	}
+
+#ifdef START_PARODUS
+	LogInfo("Starting parodus process ..\n");
+	system(command);
+#endif
+	
+    	if (NULL != g_fArmConsoleLog)
+		fclose(g_fArmConsoleLog);
+	return 0;
+	
+RETURN_ERROR:
+       if(webpaUrl != NULL)
+       {
+          free(webpaUrl);
+          webpaUrl = NULL;
+       }
+       LogError("main function - RETURN_ERROR\n");
+       return -1;
+	
+}
+#endif // UNIT_TEST_DOCKER_SUPPORT
+
