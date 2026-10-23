@@ -32,7 +32,7 @@ extern "C"
 {
 #include "safec_lib_common.h"
 #include "cJSON.h"
-void getPartnerId(char *partner_id);
+#include "start_parodus.h"
 int addParodusCmdToFile(char *command);
 int  writeToJson(char *data);
 void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
@@ -113,7 +113,7 @@ TEST_F(StartParodusTestFixture, getPartnerId_PartnerIdExists)
             Return(0)
         ));
 
-    getPartnerId(partner_id);
+    getPartnerId(partner_id, sizeof(partner_id));
     EXPECT_STREQ(partner_id, expected_partner_id);
 }
 
@@ -146,7 +146,7 @@ TEST_F(StartParodusTestFixture, getPartnerId_new_partnerID_Successful_get)
         .Times(1)
         .WillOnce(Return(0));
     
-    getPartnerId(partner_id);
+    getPartnerId(partner_id, sizeof(partner_id));
     EXPECT_STREQ(partner_id, "TEST_PARTNER_ID");
 }
 
@@ -164,7 +164,7 @@ TEST_F(StartParodusTestFixture, getPartnerId_popen_Fail)
         .Times(1)
         .WillOnce(Return(nullptr));
     
-    getPartnerId(partner_id);
+    getPartnerId(partner_id, sizeof(partner_id));
     EXPECT_STREQ(partner_id, "");
 }
 
@@ -193,7 +193,7 @@ TEST_F(StartParodusTestFixture, getPartnerId_fgets_error)
         .Times(1)
         .WillOnce(Return(0));
     
-    getPartnerId(partner_id);
+    getPartnerId(partner_id, sizeof(partner_id));
     EXPECT_STREQ(partner_id, "");
 }
 
@@ -4683,3 +4683,4 @@ TEST_F(UpdateWebpaCrucialUrlTestFixture, partnerJsonFallback_PartialSuccess_Only
     // Cleanup
     if (WEBPA_SERVER_URL && WEBPA_SERVER_URL != saved_webpa_url) free(WEBPA_SERVER_URL);
 }
+

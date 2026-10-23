@@ -27,6 +27,39 @@ log() {
     echo " "
 }
 
+usage="Usage: $0 [PR_ID] [DEVICE_GATEWAY|DEVICE_VIDEO] [clean]"
+pr_id=""
+platform="${PLATFORM:-DEVICE_GATEWAY}"
+do_clean=0
+
+for arg in "$@"; do
+    case "$arg" in
+        clean)
+            do_clean=1
+            ;;
+        DEVICE_GATEWAY|DEVICE_VIDEO)
+            platform="$arg"
+            ;;
+        *)
+            if [ -n "$pr_id" ]; then
+                log "ERROR" "$usage"
+                exit 2
+            fi
+            pr_id="$arg"
+            ;;
+    esac
+done
+
+case "$platform" in
+    DEVICE_GATEWAY|DEVICE_VIDEO)
+        log "INFO" "Selected platform: $platform"
+        ;;
+    *)
+        log "ERROR" "Invalid platform '$platform'. Choose DEVICE_GATEWAY or DEVICE_VIDEO."
+        exit 2
+        ;;
+esac
+
 # Clone or enter RdkbGMock
 if [ -d "RdkbGMock" ]; then
     log "INFO" "RdkbGMock directory already exists. Skipping clone."
@@ -42,9 +75,8 @@ else
     fi
 fi
 
-# Check if a pull request ID is provided in argument 1
-if [ -n "$1" ]; then
-    pr_id="$1"
+# Check if a pull request ID was provided
+if [ -n "$pr_id" ]; then
     log "INFO" "Fetching PR ID: $pr_id and checking out FETCH_HEAD"
     if git fetch "https://github.com/rdkcentral/gmock-broadband.git" pull/"$pr_id"/head && git checkout FETCH_HEAD; then
         log "INFO" "Successfully checked out PR #$pr_id"
@@ -84,9 +116,9 @@ else
     exit 1
 fi
 
-# Run configure with specific options
-log "INFO" "Running configure with options --enable-unitTestDockerSupport..."
-if ./configure --enable-unitTestDockerSupport; then
+# Run configure with the selected platform
+log "INFO" "Running configure with unit-test support for $platform..."
+if ./configure --enable-unitTestDockerSupport --with-platform="$platform"; then
     log "INFO" "Configuration successful."
 else
     log "ERROR" "Configuration failed."
@@ -115,8 +147,18 @@ run_all_gtests() {
     test_dirs=( $(find source/test -type f -name 'Makefile' -exec dirname {} \; | sort -u) )
 
     for make_dir in "${test_dirs[@]}"; do
-        log "INFO" "Running make in $make_dir..."
-        if make -C "$make_dir"; then
+        if [ "$do_clean" -eq 1 ]; then
+            log "INFO" "Running make clean in $make_dir..."
+            if make -C "$make_dir" clean; then
+                log "INFO" "Make clean completed successfully in $make_dir."
+            else
+                log "ERROR" "Make clean failed in $make_dir."
+                exit 1
+            fi
+        fi
+
+        log "INFO" "Running make serially in $make_dir..."
+        if make -j1 -C "$make_dir"; then
             log "INFO" "Make operation completed successfully in $make_dir."
         else
             log "ERROR" "Make operation failed in $make_dir."
@@ -192,3 +234,4 @@ fi
 log "INFO" "Completed Gcov report analysis"
 
 log "INFO" "All operations completed for UT successfully"
+
