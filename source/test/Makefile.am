@@ -48,11 +48,6 @@ parodusStart_gtest_bin_CPPFLAGS += -DDEVICE_GATEWAY
 parodusStart_gtest_bin_SOURCES += $(top_srcdir)/source/parodusStart/rdkb/rdkb_imp.c
 endif
 
-if DEVICE_VIDEO
-parodusStart_gtest_bin_CPPFLAGS += -DDEVICE_VIDEO
-parodusStart_gtest_bin_SOURCES += $(top_srcdir)/source/parodusStart/rdkv/impl.c
-endif
-
 parodusStart_gtest_bin_LDFLAGS = -lgtest -lgmock -lgcov -lpthread
 
 parodusStart_gtest_bin_LDADD = $(HOME)/usr/local/lib/libmock_safec_lib.la \

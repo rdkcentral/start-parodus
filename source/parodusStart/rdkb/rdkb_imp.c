@@ -1323,7 +1323,7 @@ void getRebootReason(char *reason, size_t reasonLen)
 
     /* Strip all spaces and parentheses from reboot reason to make it one word */
     /* This also prevents command line parsing issues due to value like '-s' */
-    for (i = 0; i < sizeof(lastRebootReason) && j < reasonLen; i++)
+    for (i = 0; i < sizeof(lastRebootReason) && lastRebootReason[i] != '\0' && j < reasonLen; i++)
     {
         if (lastRebootReason[i] != ' ' && lastRebootReason[i] != '(' && lastRebootReason[i] != ')')
         {
@@ -1335,18 +1335,6 @@ void getRebootReason(char *reason, size_t reasonLen)
     LogInfo("Modified lastRebootReason is %s\n", reason);
 }
 
-#if 0
-static void sync_free_values(char *values[], int count)
-{
-    int i;
-
-    for (i = 0; i < count; i++)
-    {
-        free(values[i]);
-        values[i] = NULL;
-    }
-}
-#endif
 static void getValuesFromPsmDb(char *names[], char **values,int count)
 {
     int i=0;
@@ -1417,7 +1405,7 @@ static int getPartnerUrl(const char *partnerId, const char *paramName, char **va
     {
         partnerObject = cJSON_GetObjectItem(json, partnerKey);
         item = partnerObject == NULL ? NULL : cJSON_GetObjectItem(partnerObject, paramName);
-        if (item != NULL && cJSON_IsString(item) && item->valuestring != NULL)
+        if (item != NULL && cJSON_IsString(item) && item->valuestring != NULL && item->valuestring[0] != '\0')
         {
             *value = strdup(item->valuestring);
         }
@@ -1494,14 +1482,14 @@ static void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
                 char *t = strrchr(buf, '"');
                 if(t)
                     *t = '\0';
-		snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
-		if (sscanf(buf, fmt, &index, temp) == 2 && index == i) {
+                snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
+                if (sscanf(buf, fmt, &index, temp) == 2 && index == i) {
                     values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
                     rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
                     if(rc != EOK)
                     {
                         ERR_CHK(rc);
-						pclose(out);
+                        pclose(out);
                         return;
                     }
                 }

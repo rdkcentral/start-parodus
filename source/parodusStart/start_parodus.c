@@ -33,7 +33,6 @@
 #include "rdkb/rdkb_imp.h"
 #else
 #include <signal.h>
-#include "rdkv/rdkv_imp.h"
 #endif
 
 #define MAX_SERVER_URL_SIZE           64
@@ -144,7 +143,8 @@ int main(int argc, char *argv[])
 
     if (getDeviceMac(deviceMac, sizeof(deviceMac)) != 0)
     {
-        LogError("Unable to get device MAC, continuing\n");
+        LogError("Unable to get device MAC, reseting Start_Parodus\n");
+        goto RETURN_ERROR;
     }
 
     getBootTime(&bootTime, &wait_time);
@@ -199,26 +199,26 @@ int main(int argc, char *argv[])
     LogInfo("Framing command for parodus\n");
     commandConfig = (ParodusCommandConfig){
         .modelName = modelName,
-            .serialNumber = serialNumber,
-            .manufacturer = manufacturer,
-            .lastRebootReason = final_lastRebootReason,
-            .firmwareVersion = firmwareVersion,
-            .bootTime = bootTime,
-            .deviceMac = deviceMac,
-            .webpaInterface = webpaInterface,
-            .webpaUrl = webpaUrl,
-            .webpaPingTime = webpaPingTime,
-            .parodusUrl = parodus_url,
-            .partnerId = partner_id,
-            .seshatUrl = seshat_url,
-            .clientCertPath = client_cert_path,
-            .sslEngine = ssl_engine,
-            .sslCertType = ssl_cert_type,
-            .sslReferenceName = ssl_reference_name,
-            .tokenServerUrl = TOKEN_SERVER_URL,
-            .acquireJwt = jwtFlag,
-            .dnsTextUrl = DNS_TEXT_URL,
-            .bootTimeRetryWait = wait_time
+        .serialNumber = serialNumber,
+        .manufacturer = manufacturer,
+        .lastRebootReason = final_lastRebootReason,
+        .firmwareVersion = firmwareVersion,
+        .bootTime = bootTime,
+        .deviceMac = deviceMac,
+        .webpaInterface = webpaInterface,
+        .webpaUrl = webpaUrl,
+        .webpaPingTime = webpaPingTime,
+        .parodusUrl = parodus_url,
+        .partnerId = partner_id,
+        .seshatUrl = seshat_url,
+        .clientCertPath = client_cert_path,
+        .sslEngine = ssl_engine,
+        .sslCertType = ssl_cert_type,
+        .sslReferenceName = ssl_reference_name,
+        .tokenServerUrl = TOKEN_SERVER_URL,
+        .acquireJwt = jwtFlag,
+        .dnsTextUrl = DNS_TEXT_URL,
+        .bootTimeRetryWait = wait_time
     };
 
     if (buildParodusCommand(command, sizeof(command), &commandConfig) != 0)

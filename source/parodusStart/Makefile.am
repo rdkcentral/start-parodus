@@ -33,11 +33,6 @@ parodusStart_SOURCES += rdkb/rdkb_imp.c rdkb/rdkb_imp.h
 AM_CFLAGS += -DDEVICE_GATEWAY
 endif
 
-if DEVICE_VIDEO
-parodusStart_SOURCES += rdkv/impl.c rdkv/rdkv_imp.h
-AM_CFLAGS += -DDEVICE_VIDEO
-endif
-
 if CCSP_ARCH_ARM
 parodusStart_CPPFLAGS = -D_ANSC_LINUX -D_ANSC_USER 
 parodusStart_LDFLAGS =  -lhal_platform
