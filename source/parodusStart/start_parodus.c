@@ -1376,7 +1376,7 @@ STATIC void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
                 if(t)
                     *t = '\0';
 		snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
-		if (sscanf(buf, fmt, &index, temp) == 2 && index == i) {
+		if (sscanf(buf, fmt, &index, temp) == 2 && index == i && strlen(temp) > 0) {
                     values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
                     rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
                     if(rc != EOK)
@@ -1487,7 +1487,7 @@ STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count)
     for(i=0; i<count; i++)
     {
     	char temp[MAX_VALUE_SIZE] ={'\0'};
-        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0)
+        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0 && strlen(temp) > 0)
         {
 	    	values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
                 rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
@@ -1763,22 +1763,29 @@ STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl)
                     if( *serverUrl == NULL)
                     {
                       LogError("Error in serverUrl malloc\n");
-                       return;
-                    }  
-                    
-                    rc = sprintf_s(*serverUrl, MAX_SERVER_URL_SIZE, "https://%s:%s",tempUrl,serverPort);
-                    if(rc < EOK)
-                    {
-                       ERR_CHK(rc);
-                       LogError("Error in updating server URL\n");
-                    }
-                    free(serverPort);
+                       free(serverPort);
                     cJSON_Delete(out);
+                    free(tempUrl);
+                    return;
+                    }  
+                        
+                       rc = sprintf_s(*serverUrl, MAX_SERVER_URL_SIZE, "https://%s:%s",tempUrl,serverPort);
+                       if(rc < EOK)
+                    {
+                    ERR_CHK(rc);
+                    LogError("Error in updating server URL\n");
                 }
-                else
+                free(serverPort);
+                cJSON_Delete(out);
+                    }
+                    else
                 {
-                    LogError("Error in fetching data from webpa_cfg.json file\n");
-                    *serverUrl = NULL;
+                if(serverPort != NULL)
+                free(serverPort);
+                if(out != NULL)
+                cJSON_Delete(out);
+                LogError("Error in fetching data from webpa_cfg.json file\n");
+                *serverUrl = NULL;
                 }
                       
 
