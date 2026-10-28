@@ -747,6 +747,8 @@ int main(int argc, char *argv[])
 	}
 	else if(decodeStatus == 2)
 	{
+          if (DEVICE_CERT[0] != '\0')
+            {
 		rc = strcpy_s(client_cert_path, sizeof(client_cert_path), DEVICE_CERT);
 		if(rc != EOK)
 		{
@@ -757,7 +759,9 @@ int main(int argc, char *argv[])
 		{
 			LogInfo("client_cert_path is %s\n", client_cert_path);
 		}
-
+	    }
+	  if (DEVICE_CERT_REF[0] != '\0')
+            {
 		rc = strcpy_s(ssl_reference_name, sizeof(ssl_reference_name), DEVICE_CERT_REF);
 		if(rc != EOK)
 		{
@@ -768,6 +772,7 @@ int main(int argc, char *argv[])
 		{
 			LogInfo("ssl_reference_name is %s\n", ssl_reference_name);
 		}
+	    }
 	}
 	else if(decodeStatus == 3)
 	{
@@ -1345,6 +1350,11 @@ STATIC void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
     const size_t fmtBufSize = 32;
     char fmt[fmtBufSize];
 
+    if (names == NULL || values == NULL || count <= 0) {
+        LogError("Invalid arguments passed to getWebpaValuesFromPsmDb\n");
+        return;
+    }
+
     for(i=0; i<count; i++)
     {
         rc = sprintf_s(tempBuf + offset, sizeof(tempBuf) - offset, " %dX %s", i, names[i]);
@@ -1355,6 +1365,7 @@ STATIC void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
         }
         offset += rc;
     }
+
     rc = sprintf_s(command, sizeof(command),"psmcli get -e%s", tempBuf);
     if(rc < EOK)
     {
@@ -1364,26 +1375,48 @@ STATIC void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
     LogInfo("command : %s\n",command);
 
     out = popen(command, "r");
-    if(out)
+    if(out != NULL)
     {
         for(i=0; i<count; i++)
         {
             if(fgets(buf, sizeof(buf), out) == NULL)
-                LogError("fgets() error\n");
-            if(strlen(buf) > 0)
+            {
+                LogError("fgets() error or EOF\n");
+                break;
+            }
+
+            if (buf[0] != '\0')
             {
                 char *t = strrchr(buf, '"');
-                if(t)
+                if (t != NULL)
+                {
                     *t = '\0';
-		snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
-		if (sscanf(buf, fmt, &index, temp) == 2 && index == i) {
-                    values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
-                    rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
-                    if(rc != EOK)
+                }
+
+                snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
+                if (sscanf(buf, fmt, &index, temp) == 2 && index == i)
+                {
+                    if (temp[0] != '\0')
                     {
-                        ERR_CHK(rc);
-						pclose(out);
-                        return;
+                        values[i] = (char *) malloc(sizeof(char) * MAX_VALUE_SIZE);
+                        if (values[i] != NULL)
+                        {
+                            rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
+                            if (rc != EOK)
+                            {
+                                ERR_CHK(rc);
+                                free(values[i]);
+                                values[i] = NULL;
+                                pclose(out);
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            LogError("Memory allocation failed for values[%d]\n", i);
+                            pclose(out);
+                            return;
+                        }
                     }
                 }
             }
@@ -1392,6 +1425,7 @@ STATIC void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
                 LogInfo("End of file reached\n");
                 break;
             }
+	    buf[0] = '\0';
         }
         pclose(out);
     }
@@ -1486,10 +1520,10 @@ STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count)
     errno_t rc = -1;
     for(i=0; i<count; i++)
     {
-    	char temp[MAX_VALUE_SIZE] ={'\0'};
-        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0)
+        char temp[MAX_VALUE_SIZE] ={'\0'};
+        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0 && strlen(temp) > 0)
         {
-	    	values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
+                values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
                 rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
                 if(rc != EOK)
                 {
@@ -1745,13 +1779,17 @@ STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl)
     char *serverPort = NULL;
     errno_t rc = -1;
       
-      if (*serverUrl == NULL ) {
+      if (serverUrl == NULL || *serverUrl == NULL ) {
              LogError(" **serverUrl is NULL \n");
           return;
       }
 
 
       tempUrl = strndup(*serverUrl, MAX_SERVER_URL_SIZE);
+            if (tempUrl == NULL){
+		    LogError("Error in strndup for tempUrl\n");
+		    return;
+	    }
             if(checkServerUrlFormat(tempUrl) != 1 && strstr(tempUrl, "comcast") != NULL)
             {
                 getValueFromCfgJson( "ServerPort", &serverPort, &out);
@@ -1763,8 +1801,17 @@ STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl)
                     if( *serverUrl == NULL)
                     {
                       LogError("Error in serverUrl malloc\n");
-                       return;
-                    }  
+		      if (serverPort) {
+			      free(serverPort);
+			      serverPort = NULL;
+		      }
+		      if (out) {
+			      cJSON_Delete(out);
+			      out = NULL;
+		      }
+		      free(tempUrl);
+		      return;
+		    }
                     
                     rc = sprintf_s(*serverUrl, MAX_SERVER_URL_SIZE, "https://%s:%s",tempUrl,serverPort);
                     if(rc < EOK)
@@ -1772,18 +1819,27 @@ STATIC void checkAndUpdateServerUrlFromDevCfg(char **serverUrl)
                        ERR_CHK(rc);
                        LogError("Error in updating server URL\n");
                     }
-                    free(serverPort);
-                    cJSON_Delete(out);
                 }
                 else
                 {
                     LogError("Error in fetching data from webpa_cfg.json file\n");
+		    free(*serverUrl);
                     *serverUrl = NULL;
                 }
-                      
 
             }
-            free(tempUrl);
+	        if (serverPort != NULL) {
+        free(serverPort);
+        serverPort = NULL;
+    }
+    if (out != NULL) {
+        cJSON_Delete(out);
+        out = NULL;
+    }
+    if (tempUrl != NULL) {
+        free(tempUrl);
+        tempUrl = NULL;
+    }
            
 }
 #endif
