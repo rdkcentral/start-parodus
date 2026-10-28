@@ -1518,43 +1518,18 @@ STATIC void getValuesFromSysCfgDb(char *names[], char **values,int count)
 {
     int i = 0;
     errno_t rc = -1;
-    if (names == NULL || values == NULL || count <= 0) {
-	    LogError("Invalid arguments passed to getValuesFromSysCfgDb\n");
-	    return;
-    }
     for(i=0; i<count; i++)
     {
-    	char temp[MAX_VALUE_SIZE] ={'\0'};
-	if (names[i] != NULL && syscfg_get(NULL, names[i], temp, sizeof(temp)) == 0)
+        char temp[MAX_VALUE_SIZE] ={'\0'};
+        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0 && strlen(temp) > 0)
         {
-            if (temp[0] != '\0')
-            {
                 values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
-                if (values[i] != NULL)
-                {
                 rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
-                    if (rc != EOK)
-                    {
-                        ERR_CHK(rc);
-                        free(values[i]);
-                        values[i] = NULL;
-                        return;
-                    }
-                }
-                else
+                if(rc != EOK)
                 {
-                    LogError("Memory allocation failed for values[%d]\n", i);
+                    ERR_CHK(rc);
                     return;
                 }
-            }
-            else
-            {
-                values[i] = NULL;
-            }
-        }
-        else
-        {
-            values[i] = NULL;
         }
     }
 }
