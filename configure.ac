@@ -38,6 +38,14 @@ AC_ARG_ENABLE([unitTestDockerSupport],
              [echo "Docker support is disabled"])
 AM_CONDITIONAL([UNIT_TEST_DOCKER_SUPPORT], [test x$UNIT_TEST_DOCKER_SUPPORT = xtrue])
 
+AC_ARG_WITH([platform],
+    [AS_HELP_STRING([--with-platform=<platform>], [DEVICE_GATEWAY or DEVICE_VIDEO])],
+    [PLATFORM=$withval],
+    [PLATFORM=DEVICE_GATEWAY])
+
+AM_CONDITIONAL([DEVICE_GATEWAY], [test x$PLATFORM = xDEVICE_GATEWAY])
+AM_CONDITIONAL([DEVICE_VIDEO], [test x$PLATFORM = xDEVICE_VIDEO])
+
 AC_PREFIX_DEFAULT(`pwd`)
 AC_ENABLE_SHARED
 AC_DISABLE_STATIC
