@@ -2,7 +2,7 @@
  * If not stated otherwise in this file or this component's Licenses.txt file the
  * following copyright and licenses apply:
  *
- * Copyright 2019 RDK Management
+ * Copyright 2026 RDK Management
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,12 +62,6 @@ extern int numLoops;
 #endif
 
 #define DEVICE_PROPS_FILE  "/etc/device.properties"
-#define MAX_BUF_SIZE       1024
-#define MAX_PROCESS_LEN    16
-#define MAX_VALUE_SIZE     64
-#define MAX_PARTNERID_LEN  64
-#define MAX_SERVER_URL_SIZE 64
-#define MAX_BUILD_LEN      16
 #define MODULE             "PARODUS"
 #define WEBPA_CFG_FILE     "/nvram/webpa_cfg.json"
 #define WEBPA_CFG_FIRMWARE_VER "oldFirmwareVersion"
@@ -83,11 +77,8 @@ extern int numLoops;
 #define DEVICE_CERT_REF     "/tmp/.cfgDynamicxpki"
 #define STATIC_CERT_REF     "/tmp/.cfgStaticxpki"
 #define PARODUS_UPSTREAM    "tcp://127.0.0.1:6666"
-#define SSL_CERT_BUNDLE     "/etc/ssl/certs/ca-certificates.crt"
-#define JWT_KEY             "/etc/ssl/certs/webpa-rs256.pem"
 #define CRUD_CONFIG_FILE    "/nvram/parodus_cfg.json"
 #define PARCONNHEALTH_FILE  "/tmp/parconnhealth.txt"
-#define RECORD_JWT_PAYLOAD_FILE "/tmp/xmidt-jwt-payload.json"
 #define MAX_QUEUE_SIZE      10
 
 #if !defined(_COSA_BCM_MIPS_)
@@ -107,7 +98,7 @@ int s_sysevent_connect(token_t *out_se_token);
 #endif
 
 FILE *g_fArmConsoleLog = NULL;
-static char parodusStart_Log[MAX_BUF_SIZE] = {'\0'};
+static char parodusStart_Log[BUFFER_LEN_1024] = {'\0'};
 static void free_sync_db_items(int paramCount,char *psmValues[],char *sysCfgValues[]);
 static void getWebpaValuesFromPsmDb(char *names[], char **values,int count);
 static void getValuesFromSysCfgDb(char *names[], char **values,int count);
@@ -117,8 +108,8 @@ void rdkb_log(int level, const char *msg, ...)
     static const char *_level[] = { "Error", "Info" };
     va_list arg_ptr;
     int nbytes;
-    char buf[MAX_BUF_SIZE];
-    char curtime[128];
+    char buf[BUFFER_LEN_1024];
+    char curtime[BUFFER_LEN_128];
     time_t rawtime;
     struct tm timeinfo;
 
@@ -170,7 +161,7 @@ FILE *log_init(void)
             if((value = strstr(str, "PARODUS_START_LOG_FILE=")))
             {
                 value = value + strlen("PARODUS_START_LOG_FILE=");
-                rc = strcpy_s(parodusStart_Log, MAX_BUF_SIZE, value);
+                rc = strcpy_s(parodusStart_Log, BUFFER_LEN_1024, value);
                 if(rc != EOK)
                 {
                     ERR_CHK(rc);
@@ -205,7 +196,7 @@ void log_close(void)
 
 int handle_wan_status(int argc, char *argv[])
 {
-    char output[MAX_PROCESS_LEN] = {'\0'};
+    char output[BUFFER_LEN_16] = {'\0'};
     FILE *cmd = NULL;
     const char *pid_cmd = "pidof parodus";
     errno_t rc = -1;
@@ -237,7 +228,7 @@ int handle_wan_status(int argc, char *argv[])
                     return 1;
                 }
 
-                if(fgets(output,MAX_PROCESS_LEN,cmd) == NULL)
+                if(fgets(output, BUFFER_LEN_16, cmd) == NULL)
                     LogError("fgets() error\n");
                 pid_t pid = strtoul(output,NULL,10);// base 10 (decimal)
                 LogInfo("Check parodus pid %d\n",pid);
@@ -371,6 +362,8 @@ int buildParodusCommand(char *command, size_t commandLen,
 
     if (command == NULL || commandLen == 0 || config == NULL)
     {
+        LogError("buildParodusCommand: invalid input (command=%p, commandLen=%zu, config=%p)\n",
+                 (void *)command, commandLen, (const void *)config);
         return -1;
     }
     command[0] = '\0';
@@ -395,6 +388,8 @@ int buildParodusCommand(char *command, size_t commandLen,
                              commandValueOrEmpty(config->partnerId), SSL_CERT_BUNDLE,
                              PARCONNHEALTH_FILE) != 0)
     {
+        LogError("buildParodusCommand: failed to append base parodus args (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
         return -1;
     }
 
@@ -402,6 +397,8 @@ int buildParodusCommand(char *command, size_t commandLen,
     if (appendParodusCommand(command, commandLen, &offset, " --seshat-url=%s",
                              commandValueOrEmpty(config->seshatUrl)) != 0)
     {
+        LogError("buildParodusCommand: ENABLE_SESHAT - failed to append seshat-url (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
         return -1;
     }
 #endif
@@ -415,6 +412,8 @@ int buildParodusCommand(char *command, size_t commandLen,
                              commandValueOrEmpty(config->sslReferenceName),
                              commandValueOrEmpty(config->tokenServerUrl)) != 0)
     {
+        LogError("buildParodusCommand: failed to append SSL/token-server args (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
         return -1;
     }
 
@@ -425,6 +424,8 @@ int buildParodusCommand(char *command, size_t commandLen,
                              config->acquireJwt, commandValueOrEmpty(config->dnsTextUrl),
                              JWT_KEY, RECORD_JWT_PAYLOAD_FILE) != 0)
     {
+        LogError("buildParodusCommand: FEATURE_DNS_QUERY - failed to append JWT/DNS args (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
         return -1;
     }
 #endif
@@ -433,6 +434,8 @@ int buildParodusCommand(char *command, size_t commandLen,
                              " --crud-config-file=%s --boot-time-retry-wait=%d",
                              CRUD_CONFIG_FILE, config->bootTimeRetryWait) != 0)
     {
+        LogError("buildParodusCommand: failed to append crud-config/boot-time-retry args (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
         return -1;
     }
 
@@ -440,11 +443,19 @@ int buildParodusCommand(char *command, size_t commandLen,
     if (appendParodusCommand(command, commandLen, &offset, " --max-queue-size=%d",
                              MAX_QUEUE_SIZE) != 0)
     {
+        LogError("buildParodusCommand: ENABLE_WEBCFGBIN - failed to append max-queue-size (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
         return -1;
     }
 #endif
 
-    return appendParodusCommand(command, commandLen, &offset, " &");
+    if (appendParodusCommand(command, commandLen, &offset, " &") != 0)
+    {
+        LogError("buildParodusCommand: failed to append background '&' (offset=%zu, commandLen=%zu)\n",
+                 offset, commandLen);
+        return -1;
+    }
+    return 0;
 }
 
 void get_url(char *parodusUrl, char *seshatUrl, char *buildType)
@@ -528,7 +539,7 @@ int getDeviceMac(char *deviceMac, size_t macLen)
     FILE *fp = popen("sh /usr/sbin/deviceinfo.sh -cmac", "r");
     if (fp != NULL)
     {
-        char buffer[32] = {0};
+        char buffer[BUFFER_LEN_32] = {0};
         char *newline = NULL;
 
         if (fgets(buffer, sizeof(buffer), fp) != NULL && strstr(buffer, ":") != NULL)
@@ -575,8 +586,8 @@ int getDeviceMac(char *deviceMac, size_t macLen)
         return -1;
     }
 #else
-    char ethEnabledValue[64] = {'\0'};
-    char deviceMacValue[32] = {'\0'};
+    char ethEnabledValue[BUFFER_LEN_64] = {'\0'};
+    char deviceMacValue[BUFFER_LEN_32] = {'\0'};
     const char *defaultCmMac = "00:1A:2B:11:22:33";
     token_t token;
     int fd = s_sysevent_connect(&token);
@@ -770,7 +781,7 @@ int getWebpaInterface(char *interfaceName, size_t interfaceLen)
 #if defined(WAN_FAILOVER_SUPPORTED) || defined(FEATURE_RDKB_CONFIGURABLE_WAN_INTERFACE)
     token_t token;
     int fd = s_sysevent_connect(&token);
-    char interfaceValue[64] = {'\0'};
+    char interfaceValue[BUFFER_LEN_64] = {'\0'};
 
     if (fd < 0)
     {
@@ -848,7 +859,7 @@ static int getValueFromCfgJson(const char *key, char **value)
         }
         else if (item != NULL && cJSON_IsNumber(item))
         {
-            char numberValue[MAX_VALUE_SIZE];
+            char numberValue[BUFFER_LEN_64];
             int written = snprintf(numberValue, sizeof(numberValue), "%d", item->valueint);
             if (written >= 0 && (size_t)written < sizeof(numberValue))
             {
@@ -931,7 +942,7 @@ static void getSECertSupport(char *seCertSupport, size_t supportLen)
 int getDeviceConfigFile(void)
 {
     struct stat fileAttributes;
-    char useSECertValue[MAX_BUF_SIZE] = {'\0'};
+    char useSECertValue[BUFFER_LEN_1024] = {'\0'};
 
     getSECertSupport(useSECertValue, sizeof(useSECertValue));
 
@@ -1279,7 +1290,7 @@ void getManufacturer(char *manufacturer, size_t len)
 void getRebootReason(char *reason, size_t reasonLen)
 {
     char rebootCounter[8] = {'\0'};
-    char lastRebootReason[128] = {'\0'};
+    char lastRebootReason[BUFFER_LEN_128] = {'\0'};
     errno_t rc;
     unsigned int i = 0, j = 0;
 
@@ -1323,7 +1334,7 @@ void getRebootReason(char *reason, size_t reasonLen)
 
     /* Strip all spaces and parentheses from reboot reason to make it one word */
     /* This also prevents command line parsing issues due to value like '-s' */
-    for (i = 0; i < sizeof(lastRebootReason) && lastRebootReason[i] != '\0' && j < reasonLen; i++)
+    for (i = 0; i < sizeof(lastRebootReason) && lastRebootReason[i] != '\0' && j+1 < reasonLen; i++)
     {
         if (lastRebootReason[i] != ' ' && lastRebootReason[i] != '(' && lastRebootReason[i] != ')')
         {
@@ -1340,12 +1351,12 @@ static void getValuesFromPsmDb(char *names[], char **values,int count)
     int i=0;
     char* prefixNames[count];
     char* buf = NULL;
-    buf = (char*) malloc(MAX_BUF_SIZE);
+    buf = (char*) malloc(BUFFER_LEN_1024);
     if(buf != NULL)
     {
         for(i=0; i<count; i++)
         {
-            snprintf(buf, MAX_BUF_SIZE, "%s%s", PSM_PATH_PREFIX, names[i]);
+            snprintf(buf, BUFFER_LEN_1024, "%s%s", PSM_PATH_PREFIX, names[i]);
 	        prefixNames[i] = strdup(buf);
         }
         free(buf);
@@ -1444,12 +1455,12 @@ static void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
 {
     FILE* out = NULL;
     errno_t rc = -1;
-    char command[MAX_BUF_SIZE]={'\0'};
-    char buf[MAX_BUF_SIZE] = {'\0'};
-    char tempBuf[MAX_BUF_SIZE] ={'\0'};
+    char command[BUFFER_LEN_1024]={'\0'};
+    char buf[BUFFER_LEN_1024] = {'\0'};
+    char tempBuf[BUFFER_LEN_1024] ={'\0'};
     int offset = 0, i=0, index=0;
-    char temp[MAX_VALUE_SIZE] = {'\0'};
-    const size_t fmtBufSize = 32;
+    char temp[BUFFER_LEN_64] = {'\0'};
+    const size_t fmtBufSize = BUFFER_LEN_32;
     char fmt[fmtBufSize];
 
     for(i=0; i<count; i++)
@@ -1482,10 +1493,10 @@ static void getWebpaValuesFromPsmDb(char *names[], char **values,int count)
                 char *t = strrchr(buf, '"');
                 if(t)
                     *t = '\0';
-                snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", MAX_VALUE_SIZE - 1);
+                snprintf(fmt, sizeof(fmt), "%%dX=\"%%%ds", BUFFER_LEN_64 - 1);
                 if (sscanf(buf, fmt, &index, temp) == 2 && index == i) {
-                    values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
-                    rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
+                    values[i] = (char *) malloc(sizeof(char)* BUFFER_LEN_64);
+                    rc = strcpy_s(values[i], BUFFER_LEN_64, temp);
                     if(rc != EOK)
                     {
                         ERR_CHK(rc);
@@ -1516,7 +1527,7 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
         "Device.X_RDKCENTRAL-COM_Webpa.TokenServer.URL",
         "Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL"
     };
-    char *psmValues[MAX_VALUE_SIZE] = {NULL};
+    char *psmValues[BUFFER_LEN_64] = {NULL};
     char *serverUrl = NULL;
     int i, paramCount = 0;
     if (webpaUrl == NULL || tokenServerUrl == NULL || dnsTextUrl == NULL)
@@ -1608,10 +1619,10 @@ int getWebpaConfig(const char *buildType, const char *partnerId, char **webpaUrl
 static int setValuesToPsmDb(char *names[], char **values,int count)
 {
     FILE* out = NULL;
-    char command[MAX_BUF_SIZE]={'\0'};
-    char buf[MAX_BUF_SIZE] = {0};
+    char command[BUFFER_LEN_1024]={'\0'};
+    char buf[BUFFER_LEN_1024] = {0};
     int i = 0, ret=0;
-    char tempBuf[MAX_BUF_SIZE] ={0};
+    char tempBuf[BUFFER_LEN_1024] ={0};
     int offset = 0;
     errno_t rc = -1;
 
@@ -1667,8 +1678,8 @@ static int syncXpcParamsOnUpgrade(char *lastRebootReason, char *firmwareVersion)
 	int paramCount = 0, status = 0, i = 0;
 	char *cfgJson_firmware = NULL;
     char *paramList[] = {"X_COMCAST-COM_CMC","X_COMCAST-COM_CID","X_COMCAST-COM_SyncProtocolVersion"};
-	char *psmValues[MAX_VALUE_SIZE] = {'\0'};
-	char *sysCfgValues[MAX_VALUE_SIZE] = {'\0'};
+	char *psmValues[BUFFER_LEN_64] = {'\0'};
+	char *sysCfgValues[BUFFER_LEN_64] = {'\0'};
 	errno_t rc = -1;
     int ind = -1;
     int parodus_enable = 0;
@@ -1833,9 +1844,9 @@ static void waitForPSMHealth(const char *compName)
 {
     int count = 0;
     int isHealthy = 0;
-    char command[128] = {0};
-    char parameterName[128] = {0};
-    char componentStatus[32] = {0};
+    char command[BUFFER_LEN_128] = {0};
+    char parameterName[BUFFER_LEN_128] = {0};
+    char componentStatus[BUFFER_LEN_32] = {0};
     errno_t rc;
     int ind = -1;
 
@@ -1907,8 +1918,8 @@ void syncPsmDbOnUpgrade(char *firmwareVersion)
         "X_COMCAST-COM_CID",
         "X_COMCAST-COM_SyncProtocolVersion"
     };
-    char *psmValues[MAX_VALUE_SIZE] = {NULL};
-    char lastRebootReason[128] = {'\0'};
+    char *psmValues[BUFFER_LEN_64] = {NULL};
+    char lastRebootReason[BUFFER_LEN_128] = {'\0'};
     int syncStatus;
     int i, paramCount = 0;
 
@@ -1970,16 +1981,16 @@ static void getValuesFromSysCfgDb(char *names[], char **values,int count)
     errno_t rc = -1;
     for(i=0; i<count; i++)
     {
-    	char temp[MAX_VALUE_SIZE] ={'\0'};
-        if(syscfg_get( NULL, names[i], temp, MAX_VALUE_SIZE) == 0)
+        char temp[BUFFER_LEN_64] ={'\0'};
+        if(syscfg_get( NULL, names[i], temp, BUFFER_LEN_64) == 0)
         {
-	    	values[i] = (char *) malloc(sizeof(char)* MAX_VALUE_SIZE);
-                rc = strcpy_s(values[i], MAX_VALUE_SIZE, temp);
-                if(rc != EOK)
-                {
-                    ERR_CHK(rc);
-                    return;
-                }
+            values[i] = (char *) malloc(sizeof(char)* BUFFER_LEN_64);
+            rc = strcpy_s(values[i], BUFFER_LEN_64, temp);
+            if(rc != EOK)
+            {
+                ERR_CHK(rc);
+                return;
+            }
         }
     }
 }

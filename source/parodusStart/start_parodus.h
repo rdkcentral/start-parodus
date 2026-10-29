@@ -23,6 +23,21 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#define BUFFER_LEN_16                 16
+#define BUFFER_LEN_32                 32
+#define BUFFER_LEN_64                 64
+#define BUFFER_LEN_128                128
+#define BUFFER_LEN_256                256
+#define BUFFER_LEN_1024               1024
+
+#define MAX_SERVER_URL_SIZE           BUFFER_LEN_64
+#define MAX_BUILD_LEN                 BUFFER_LEN_16
+#define MAX_PARTNERID_LEN             BUFFER_LEN_64
+
+#define SSL_CERT_BUNDLE               "/etc/ssl/certs/ca-certificates.crt"
+#define JWT_KEY                       "/etc/ssl/certs/webpa-rs256.pem"
+#define RECORD_JWT_PAYLOAD_FILE       "/tmp/xmidt-jwt-payload.json"
+
 typedef struct
 {
     const char *modelName;

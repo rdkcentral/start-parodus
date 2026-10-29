@@ -35,15 +35,6 @@
 #include <signal.h>
 #endif
 
-#define MAX_SERVER_URL_SIZE           64
-#define MAX_BUILD_LEN                 16
-#define MAX_PARTNERID_LEN             64
-#define BUFFER_LEN_256                256
-#define BUFFER_LEN_128                128
-#define BUFFER_LEN_64                 64
-#define BUFFER_LEN_32                 32
-
-
 
 // RDKB uses breakpad for crash handling; RDKV uses the custom signal handler below.
 #ifdef DEVICE_GATEWAY
@@ -125,6 +116,7 @@ int main(int argc, char *argv[])
     int decodeStatus = -1;
     ParodusCommandConfig commandConfig;
 
+    LogInfo("Using unified start_parodus\n");
 #if defined (DEVICE_GATEWAY) && defined (START_PARODUS) && defined (UPDATE_CONFIG_FILE)
     LogInfo("Proceeding to unregister wan-status event\n");
 
