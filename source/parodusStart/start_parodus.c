@@ -25,14 +25,17 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef DEVICE_GATEWAY
 #if !(_COSA_BCM_MIPS_ || _COSA_DRG_TPG_ || CONFIG_CISCO)
 #include <autoconf.h>
+#endif
 #endif
 #include "start_parodus.h"
 #ifdef DEVICE_GATEWAY
 #include "rdkb/rdkb_imp.h"
 #else
 #include <signal.h>
+#include "rdkv/rdkv_imp.h"
 #endif
 
 
